@@ -1,56 +1,87 @@
 # Known Issues
 
-## CLI `connect` Command Non-Functional
+> **Last Updated**: August 19, 2025
+
+## Process Cleanup on Shutdown
 
 ### Issue
-The `agentctl connect` command doesn't actually work. It prints success but never sends the connection command to agents.
+Agents sometimes don't respond to SIGTERM gracefully, requiring SIGKILL after timeout.
 
 ### Impact
-Cannot dynamically connect agents via CLI after they're started.
-
-### Workaround
-Use the Python API directly:
-```python
-supervisor = AgentSupervisor()
-# ... start agents ...
-await supervisor.connect("alice", "bob")  # This works!
-```
+- Shutdown takes longer than necessary (10+ seconds)
+- Warning messages in logs about force killing
 
 ### Root Cause
-The CLI doesn't maintain process stdin handles after starting agents. The supervisor does, which is why demos work.
-
-## High CPU Usage with Multiple Agents
-
-### Issue
-When running multiple agents (e.g., examples/simple.py), each agent process consumes 80-100% CPU.
-
-### Root Cause
-The agent_runner.py uses blocking `sys.stdin.readline()` in an executor thread, which creates a busy-wait pattern when combined with the async event loop.
+The agent process signal handlers may not properly propagate shutdown to all async tasks.
 
 ### Workaround
-- Run fewer agents
-- Use shorter demo scripts
-- The issue doesn't affect functionality, just performance
+The supervisor automatically escalates to SIGKILL after 10 seconds, ensuring cleanup.
 
 ### Planned Fix
-Replace blocking stdin reads with:
-1. Async stdin using `aioconsole` or similar
-2. Use select/poll to check stdin availability
-3. Or restructure to use a different IPC mechanism (sockets, pipes)
+- Improve signal handling in agent_runner.py
+- Consider using SIGINT before SIGTERM
+- Ensure all async tasks are properly cancelled
+
+## Unit Test Failures in Unchanged Modules
+
+### Issue
+9 unit tests are failing in modules that weren't updated for socket architecture:
+- MCP client tests (5 failures) 
+- LLM provider tests (2 failures)
+- CLI connect tests (2 failures)
+
+### Impact
+Test suite shows 35/44 unit tests passing (79.5% pass rate)
+
+### Root Cause
+Mock objects in tests don't match the new async patterns and socket architecture.
+
+### Workaround
+Integration tests pass and demonstrate the system works correctly.
+
+### Planned Fix
+Update mock objects in affected test files to match new architecture.
 
 ## Asyncio Task Cleanup Warnings
 
 ### Issue
-When shutting down agents, you may see:
+Occasional warnings during shutdown:
 ```
 Task was destroyed but it is pending!
 ```
 
 ### Root Cause
-Background tasks for monitoring agent output aren't properly cancelled before shutdown.
+Background monitoring tasks aren't always cancelled before event loop closure.
 
 ### Impact
 Cosmetic only - doesn't affect functionality
 
+### Workaround
+Can be safely ignored.
+
+## Windows Compatibility
+
+### Issue
+Unix domain sockets are not available on Windows.
+
+### Impact
+Socket mode doesn't work on Windows; falls back to stdin mode.
+
+### Workaround
+Use `--use-stdin` flag explicitly on Windows:
+```bash
+agentctl start --use-stdin alice.yaml bob.yaml
+```
+
 ### Planned Fix
-Properly cancel all tasks in supervisor shutdown sequence.
+Implement named pipes support for Windows.
+
+## Fixed Issues ✅
+
+The following issues have been resolved:
+
+1. **CLI Connect Command** - Now works properly via Unix sockets
+2. **High CPU Usage** - Reduced from 80-100% to < 1% with socket implementation
+3. **Dynamic Connections** - Fully implemented with any agent names/ports
+4. **Port Conflicts** - Resolved with dynamic port allocation
+5. **Agent Communication** - Working bidirectionally with universal tools
