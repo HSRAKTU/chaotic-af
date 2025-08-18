@@ -1,5 +1,24 @@
 # Known Issues
 
+## CLI `connect` Command Non-Functional
+
+### Issue
+The `agentctl connect` command doesn't actually work. It prints success but never sends the connection command to agents.
+
+### Impact
+Cannot dynamically connect agents via CLI after they're started.
+
+### Workaround
+Use the Python API directly:
+```python
+supervisor = AgentSupervisor()
+# ... start agents ...
+await supervisor.connect("alice", "bob")  # This works!
+```
+
+### Root Cause
+The CLI doesn't maintain process stdin handles after starting agents. The supervisor does, which is why demos work.
+
 ## High CPU Usage with Multiple Agents
 
 ### Issue
