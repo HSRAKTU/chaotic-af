@@ -1,4 +1,16 @@
-# Agent Framework 🤖
+<div align="center">
+  <img src="assets/images/logo.png" alt="Chaotic AF Logo" width="200" />
+  
+  # 🌀 Chaotic AF
+  ### AI Swarm Framework
+  
+  **Spawn agents, connect them however you want, let them talk. That's it. Pure chaos.**
+  
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+</div>
+
+---
 
 A Python framework for building multi-agent AI systems with bidirectional communication via the Model Context Protocol (MCP).
 
