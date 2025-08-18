@@ -13,6 +13,7 @@ import threading
 
 from agent_framework.core.config import AgentConfig, load_config
 from agent_framework.core.agent import Agent
+from agent_framework.network.control_socket import AgentControlSocket
 
 
 class SimpleAgentRunner:
@@ -34,6 +35,7 @@ class SimpleAgentRunner:
         try:
             # Create and start agent
             self.agent = Agent(self.config, self.available_agents)
+            self.agent._shutdown_event = self._shutdown_event  # Share shutdown event
             
             # Start the agent (includes MCP server)
             server_task = asyncio.create_task(self.agent.start())
@@ -42,6 +44,24 @@ class SimpleAgentRunner:
             await asyncio.sleep(2)
             
             print(f"Agent {self.config.name} running on port {self.config.port}", flush=True)
+            
+            if hasattr(self, 'use_socket') and self.use_socket:
+                # Socket mode - no CPU spin
+                socket_path = f"/tmp/chaotic-af/agent-{self.config.name}.sock"
+                control = AgentControlSocket(self.agent, socket_path)
+                socket_server = await control.start()
+                
+                print("READY", flush=True)  # Signal to supervisor
+                
+                # Just wait for shutdown - no stdin polling
+                await asyncio.gather(
+                    socket_server.serve_forever(),
+                    self._shutdown_event.wait(),
+                    return_exceptions=True
+                )
+                print(f"Agent {self.config.name} shutting down gracefully", flush=True)
+                return
+            
             print("READY", flush=True)  # Signal to supervisor
             
             # Wait for CONNECT command
@@ -156,6 +176,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run an agent")
     parser.add_argument("--config", required=True, help="JSON-encoded agent configuration")
     parser.add_argument("--available-agents", required=True, help="Comma-separated list of agent names")
+    parser.add_argument("--use-socket", action="store_true", default=True, help="Use socket for control (default: True)")
+    parser.add_argument("--use-stdin", action="store_true", help="Use legacy stdin for control")
     
     args = parser.parse_args()
     
@@ -166,6 +188,8 @@ def main():
     
     # Run agent
     runner = SimpleAgentRunner(config, available_agents)
+    # Use stdin if explicitly requested, otherwise use socket
+    runner.use_socket = not args.use_stdin
     
     # Set up signal handlers
     def signal_handler(signum, frame):

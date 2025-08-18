@@ -45,10 +45,11 @@ class AgentSupervisor:
     - Resource management
     """
     
-    def __init__(self, log_dir: str = "logs"):
+    def __init__(self, log_dir: str = "logs", use_sockets: bool = True):
         self.agents: Dict[str, AgentProcess] = {}
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
+        self.use_sockets = use_sockets  # Default to socket mode
         
         # Supervisor's own logger
         self.logger = AgentLogger(
@@ -94,6 +95,10 @@ class AgentSupervisor:
                 "--config", json.dumps(agent_proc.config.__dict__),
                 "--available-agents", ",".join(self.agents.keys())
             ]
+            
+            # Add stdin flag if explicitly disabled sockets
+            if hasattr(self, 'use_sockets') and not self.use_sockets:
+                cmd.append("--use-stdin")
             
             # Set up process environment
             env = subprocess.os.environ.copy()
