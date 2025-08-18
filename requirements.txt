@@ -1,0 +1,11 @@
+# Core dependencies
+fastmcp>=0.1.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+click>=8.0
+psutil>=5.9.0
+
+# LLM providers (optional, install as needed)
+openai>=1.0.0
+anthropic>=0.15.0
+google-generativeai>=0.3.0  # Uncomment if using Google AI

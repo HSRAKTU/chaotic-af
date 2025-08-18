@@ -1,0 +1,30 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Python files
+*.py text diff=python
+*.pyi text diff=python
+
+# YAML files
+*.yaml text
+*.yml text
+
+# Documentation
+*.md text
+*.txt text
+*.rst text
+
+# Configuration
+.gitignore text
+.gitattributes text
+.env.example text
+LICENSE text
+README.md text
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
