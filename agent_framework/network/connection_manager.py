@@ -7,6 +7,8 @@ replacing the hardcoded port mapping.
 from typing import Dict, Tuple, Optional
 import asyncio
 import sys
+import os
+import json
 from dataclasses import dataclass
 from ..core.logging import setup_logging
 
@@ -60,8 +62,35 @@ class ConnectionManager:
             print(f"ConnectionManager: Target agent {to_agent} not registered.", file=sys.stderr, flush=True)
             return False
         
-        # Send connect command to the agent process
+        # Try socket first, then fall back to stdin
         agent_proc = agent_processes[from_agent]
+        
+        # Try socket first
+        socket_path = f"/tmp/chaotic-af/agent-{from_agent}.sock"
+        if os.path.exists(socket_path):
+            try:
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                cmd = {
+                    'cmd': 'connect',
+                    'target': to_agent,
+                    'endpoint': to_endpoint
+                }
+                writer.write(json.dumps(cmd).encode() + b'\n')
+                await writer.drain()
+                
+                response = await reader.readline()
+                writer.close()
+                await writer.wait_closed()
+                
+                result = json.loads(response.decode())
+                if result.get('status') == 'connected':
+                    self.connections[(from_agent, to_agent)] = True
+                    print(f"ConnectionManager: Connected {from_agent} -> {to_agent} via socket", file=sys.stderr, flush=True)
+                    return True
+            except Exception as e:
+                print(f"ConnectionManager: Socket failed, falling back to stdin: {e}", file=sys.stderr, flush=True)
+        
+        # Fall back to stdin
         if agent_proc.process and agent_proc.process.stdin:
             command = f"CONNECT:{to_agent}:{to_endpoint}\n"
             try:

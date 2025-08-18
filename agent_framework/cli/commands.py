@@ -322,22 +322,83 @@ def connect(ctx, from_agent: str, to_agent: str, bidirectional: bool):
     from_info = state['agents'][from_agent]
     to_info = state['agents'][to_agent]
     
-    # Send CONNECT command via stdin to agent process
-    try:
-        # Send connect command to from_agent's stdin
-        connect_cmd = f"CONNECT:{to_agent}:http://localhost:{to_info['port']}/mcp\n"
+    # Send CONNECT command via socket
+    import json
+    
+    async def do_connect():
+        """Execute the connection via socket."""
+        # Connect from_agent -> to_agent
+        socket_path = f"/tmp/chaotic-af/agent-{from_agent}.sock"
         
-        # Note: This is a simplified version. In production, you'd need to
-        # keep track of the process stdin or use a different IPC mechanism
-        click.echo(f"✓ Connection request sent: {from_agent} → {to_agent}")
-        
-        if bidirectional:
-            # Send reverse connection
-            connect_cmd = f"CONNECT:{from_agent}:http://localhost:{from_info['port']}/mcp\n"
-            click.echo(f"✓ Connection request sent: {to_agent} → {from_agent}")
+        try:
+            # Check if socket exists
+            if not os.path.exists(socket_path):
+                click.echo(f"✗ Agent '{from_agent}' socket not found. Is it running with socket mode?", err=True)
+                return False
+                
+            # Connect to socket
+            reader, writer = await asyncio.open_unix_connection(socket_path)
             
-    except Exception as e:
-        click.echo(f"✗ Failed to connect agents: {str(e)}", err=True)
+            # Send connect command
+            cmd = {
+                'cmd': 'connect',
+                'target': to_agent,
+                'endpoint': f'http://localhost:{to_info["port"]}/mcp'
+            }
+            writer.write(json.dumps(cmd).encode() + b'\n')
+            await writer.drain()
+            
+            # Read response
+            response = await reader.readline()
+            result = json.loads(response.decode())
+            
+            writer.close()
+            await writer.wait_closed()
+            
+            if result.get('status') == 'connected':
+                click.echo(f"✓ Connected: {from_agent} → {to_agent}")
+            else:
+                click.echo(f"✗ Failed to connect: {result.get('error', 'Unknown error')}", err=True)
+                return False
+                
+            # Bidirectional connection
+            if bidirectional:
+                # Connect to_agent -> from_agent
+                socket_path = f"/tmp/chaotic-af/agent-{to_agent}.sock"
+                
+                if not os.path.exists(socket_path):
+                    click.echo(f"✗ Agent '{to_agent}' socket not found", err=True)
+                    return False
+                    
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                
+                cmd = {
+                    'cmd': 'connect',
+                    'target': from_agent,
+                    'endpoint': f'http://localhost:{from_info["port"]}/mcp'
+                }
+                writer.write(json.dumps(cmd).encode() + b'\n')
+                await writer.drain()
+                
+                response = await reader.readline()
+                result = json.loads(response.decode())
+                
+                writer.close()
+                await writer.wait_closed()
+                
+                if result.get('status') == 'connected':
+                    click.echo(f"✓ Connected: {to_agent} → {from_agent}")
+                else:
+                    click.echo(f"✗ Failed reverse connection: {result.get('error', 'Unknown error')}", err=True)
+                    
+            return True
+            
+        except Exception as e:
+            click.echo(f"✗ Failed to connect agents: {str(e)}", err=True)
+            return False
+    
+    # Run the async connection
+    asyncio.run(do_connect())
 
 
 @cli.command()
