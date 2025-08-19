@@ -8,9 +8,10 @@ import os
 class AgentControlSocket:
     """Handles control commands via Unix socket."""
     
-    def __init__(self, agent, socket_path: str):
+    def __init__(self, agent, socket_path: str, shutdown_event=None):
         self.agent = agent
         self.socket_path = socket_path
+        self.shutdown_event = shutdown_event
     
     async def start(self):
         """Start the control socket server."""
@@ -61,7 +62,12 @@ class AgentControlSocket:
                 # Trigger shutdown
                 if hasattr(self.agent, '_shutdown_event'):
                     self.agent._shutdown_event.set()
+                if self.shutdown_event:
+                    self.shutdown_event.set()
                 response = {'status': 'shutting_down'}
+                
+                # Schedule socket cleanup after response
+                asyncio.create_task(self._cleanup_socket())
             
             else:
                 response = {'error': f"Unknown command: {cmd['cmd']}"}
@@ -79,3 +85,12 @@ class AgentControlSocket:
         finally:
             writer.close()
             await writer.wait_closed()
+    
+    async def _cleanup_socket(self):
+        """Clean up socket file after shutdown."""
+        await asyncio.sleep(0.5)  # Brief delay to ensure response is sent
+        if os.path.exists(self.socket_path):
+            try:
+                os.unlink(self.socket_path)
+            except:
+                pass

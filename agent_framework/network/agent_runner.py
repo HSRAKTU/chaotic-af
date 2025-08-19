@@ -48,17 +48,29 @@ class SimpleAgentRunner:
             if hasattr(self, 'use_socket') and self.use_socket:
                 # Socket mode - no CPU spin
                 socket_path = f"/tmp/chaotic-af/agent-{self.config.name}.sock"
-                control = AgentControlSocket(self.agent, socket_path)
+                # Pass the runner's shutdown event to control socket
+                control = AgentControlSocket(self.agent, socket_path, self._shutdown_event)
                 socket_server = await control.start()
                 
                 print("READY", flush=True)  # Signal to supervisor
                 
-                # Just wait for shutdown - no stdin polling
-                await asyncio.gather(
-                    socket_server.serve_forever(),
-                    self._shutdown_event.wait(),
-                    return_exceptions=True
-                )
+                # Create server task
+                server_task = asyncio.create_task(socket_server.serve_forever())
+                
+                # Wait for shutdown event
+                await self._shutdown_event.wait()
+                
+                # Stop socket server
+                socket_server.close()
+                await socket_server.wait_closed()
+                
+                # Cancel server task
+                server_task.cancel()
+                try:
+                    await server_task
+                except asyncio.CancelledError:
+                    pass
+                
                 print(f"Agent {self.config.name} shutting down gracefully", flush=True)
                 return
             

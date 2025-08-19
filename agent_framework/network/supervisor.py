@@ -13,6 +13,7 @@ import subprocess
 import sys
 import json
 import signal
+import os
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 from pathlib import Path
@@ -209,35 +210,54 @@ class AgentSupervisor:
         self.logger.info(f"Stopping agent {agent_name}")
         
         try:
-            # First try to send SHUTDOWN command via stdin
-            if agent_proc.process.stdin:
+            # First try socket shutdown if in socket mode
+            if self.use_sockets:
+                socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+                if os.path.exists(socket_path):
+                    try:
+                        reader, writer = await asyncio.open_unix_connection(socket_path)
+                        cmd = {"cmd": "shutdown"}
+                        writer.write(json.dumps(cmd).encode() + b'\n')
+                        await writer.drain()
+                        response = await reader.readline()
+                        writer.close()
+                        await writer.wait_closed()
+                        # Give agent time to shutdown gracefully
+                        await asyncio.sleep(1.0)
+                    except Exception as e:
+                        self.logger.warning(f"Socket shutdown failed: {e}")
+            
+            # Try stdin shutdown for legacy mode
+            elif agent_proc.process.stdin:
                 try:
                     agent_proc.process.stdin.write(b"SHUTDOWN\n")
                     agent_proc.process.stdin.flush()
-                    # Give it a moment to shut down gracefully
                     await asyncio.sleep(0.5)
                 except:
                     pass
             
-            # Then send SIGTERM for graceful shutdown
-            if sys.platform == "win32":
-                agent_proc.process.terminate()
-            else:
-                subprocess.os.kill(agent_proc.pid, signal.SIGTERM)
-            
-            # Wait for process to exit
-            try:
-                agent_proc.process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                # Force kill if not responding
-                self.logger.warning(f"Agent {agent_name} not responding, force killing")
-                
+            # Check if process exited gracefully
+            retcode = agent_proc.process.poll()
+            if retcode is None:
+                # Still running, send SIGTERM
                 if sys.platform == "win32":
-                    agent_proc.process.kill()
+                    agent_proc.process.terminate()
                 else:
-                    subprocess.os.kill(agent_proc.pid, signal.SIGKILL)
+                    subprocess.os.kill(agent_proc.pid, signal.SIGTERM)
                 
-                agent_proc.process.wait()
+                # Wait for process to exit
+                try:
+                    agent_proc.process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    # Force kill if not responding
+                    self.logger.warning(f"Agent {agent_name} not responding, force killing")
+                    
+                    if sys.platform == "win32":
+                        agent_proc.process.kill()
+                    else:
+                        subprocess.os.kill(agent_proc.pid, signal.SIGKILL)
+                    
+                    agent_proc.process.wait()
             
             agent_proc.status = "stopped"
             agent_proc.process = None
