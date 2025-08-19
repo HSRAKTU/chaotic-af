@@ -12,8 +12,8 @@ from agent_framework import AgentSupervisor, AgentConfig
 
 @pytest_asyncio.fixture
 async def supervisor():
-    """Create a supervisor with socket mode enabled."""
-    supervisor = AgentSupervisor(use_sockets=True)
+    """Create a supervisor (socket mode is now the only mode)."""
+    supervisor = AgentSupervisor()
     yield supervisor
     # Cleanup
     await supervisor.stop_all()
@@ -183,24 +183,4 @@ async def test_socket_shutdown(supervisor, alice_config):
         assert exit_code is not None, "Agent process did not shut down"
 
 
-@pytest.mark.asyncio
-async def test_backward_compatibility(supervisor, alice_config, bob_config):
-    """Test that stdin mode still works when sockets disabled."""
-    # Disable sockets
-    supervisor.use_sockets = False
-    
-    supervisor.add_agent(alice_config)
-    supervisor.add_agent(bob_config)
-    
-    # Start agents (will use stdin)
-    await supervisor.start_all(monitor=False)
-    await asyncio.sleep(3)
-    
-    # Agents should be running
-    status = supervisor.get_status()
-    assert status["alice"]["status"] == "running"
-    assert status["bob"]["status"] == "running"
-    
-    # Socket files should NOT exist
-    assert not os.path.exists("/tmp/chaotic-af/agent-alice.sock")
-    assert not os.path.exists("/tmp/chaotic-af/agent-bob.sock")
+

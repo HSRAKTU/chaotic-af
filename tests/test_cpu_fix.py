@@ -13,7 +13,7 @@ async def test_cpu_usage():
     print("Testing CPU usage fix...")
     
     # Create supervisor with socket mode
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create test agent
     alice = AgentConfig(

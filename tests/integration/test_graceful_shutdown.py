@@ -13,7 +13,7 @@ async def test_graceful_shutdown_socket_mode():
     """Test that agents shutdown gracefully via socket command."""
     
     # Create supervisor with socket mode
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create test agent
     test_agent = AgentConfig(
@@ -71,7 +71,7 @@ async def test_graceful_shutdown_socket_mode():
 async def test_multiple_agents_graceful_shutdown():
     """Test shutting down multiple agents gracefully."""
     
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create multiple agents
     agents = []
@@ -127,7 +127,7 @@ async def test_force_kill_unresponsive_agent():
     # This test would require creating an agent that ignores shutdown signals
     # For now, we'll just verify the timeout mechanism works
     
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     test_agent = AgentConfig(
         name="unresponsive_test",

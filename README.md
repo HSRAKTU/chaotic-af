@@ -2,7 +2,7 @@
   <img src="assets/images/logo.png" alt="Chaotic AF Logo" width="200" />
   
   # 🌀 Chaotic AF
-  ### Production-Ready Multi-Agent AI Framework
+  ### Multi-Agent AI Framework
   
   **Spawn agents, connect them in any topology, let them collaborate. Zero CPU overhead. Pure chaos, perfectly orchestrated.**
   
@@ -13,7 +13,7 @@
 
 ---
 
-A production-ready Python framework for building robust multi-agent AI systems with bidirectional communication via the Model Context Protocol (MCP). Features health monitoring, auto-recovery, metrics collection, and graceful shutdown.
+A Python framework for building multi-agent AI systems with bidirectional communication via the Model Context Protocol (MCP). Features health monitoring, auto-recovery, metrics collection, and graceful shutdown.
 
 ## 🌟 Features
 
@@ -25,11 +25,11 @@ A production-ready Python framework for building robust multi-agent AI systems w
 - **LLM Agnostic**: Works with OpenAI, Anthropic, Google Gemini, and more (even older models!)
 - **Process Isolation**: Each agent runs in its own process for stability and true parallelism
 
-### Production Features
+### Advanced Features
 - **Health Monitoring**: Automatic health checks with configurable thresholds
 - **Auto-Recovery**: Agents automatically restart on failure with configurable limits
 - **Graceful Shutdown**: Clean termination via socket commands and signal handling
-- **Prometheus Metrics**: Production-ready metrics collection and export
+- **Prometheus Metrics**: Comprehensive metrics collection and export
 - **Structured Logging**: Comprehensive logging with agent-specific prefixes and correlation IDs
 - **Event Streaming**: Real-time event emission for observability
 

@@ -12,7 +12,7 @@ async def test_full_agent_flow():
     """Test complete flow: start agents, connect, communicate, shutdown."""
     
     # Create supervisor with socket mode (explicitly enable)
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create test agents
     alice = AgentConfig(
@@ -92,7 +92,7 @@ async def test_full_agent_flow():
 @pytest.mark.asyncio
 async def test_socket_health_check():
     """Test agent health check via socket."""
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     test_agent = AgentConfig(
         name="test_health",

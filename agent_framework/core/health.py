@@ -114,19 +114,18 @@ class HealthMonitor:
                 await self._handle_recovery(agent_name, agent_proc)
                 return
                 
-            # Check via socket if in socket mode
-            if self.supervisor.use_sockets:
-                socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
-                healthy = await self._check_socket_health(socket_path)
+            # Check via socket
+            socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+            healthy = await self._check_socket_health(socket_path)
+            
+            if healthy:
+                self._handle_health_success(health_status)
+            else:
+                self._handle_health_failure(health_status, "Socket health check failed")
                 
-                if healthy:
-                    self._handle_health_success(health_status)
-                else:
-                    self._handle_health_failure(health_status, "Socket health check failed")
-                    
-                    # Check if we should restart
-                    if health_status.consecutive_failures >= self.config.failure_threshold:
-                        await self._handle_recovery(agent_name, agent_proc)
+                # Check if we should restart
+                if health_status.consecutive_failures >= self.config.failure_threshold:
+                    await self._handle_recovery(agent_name, agent_proc)
                         
         except Exception as e:
             self.logger.error(f"Error checking health of {agent_name}: {e}")

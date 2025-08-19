@@ -86,7 +86,7 @@ async def test_metrics_via_socket():
     """Test metrics collection via agent socket."""
     
     # Create supervisor with socket mode
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create test agent
     test_agent = AgentConfig(
@@ -151,7 +151,7 @@ async def test_supervisor_metrics():
     """Test supervisor-level metrics aggregation."""
     
     # Create supervisor
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     
     # Create multiple agents
     agents = [

@@ -49,11 +49,10 @@ class AgentSupervisor:
     - Resource management
     """
     
-    def __init__(self, log_dir: str = "logs", use_sockets: bool = True, health_config: Optional[HealthConfig] = None):
+    def __init__(self, log_dir: str = "logs", health_config: Optional[HealthConfig] = None):
         self.agents: Dict[str, AgentProcess] = {}
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
-        self.use_sockets = use_sockets  # Default to socket mode
         self.health_config = health_config  # Store for later use
         
         # Supervisor's own logger
@@ -108,9 +107,7 @@ class AgentSupervisor:
                 "--available-agents", ",".join(self.agents.keys())
             ]
             
-            # Add stdin flag if explicitly disabled sockets
-            if hasattr(self, 'use_sockets') and not self.use_sockets:
-                cmd.append("--use-stdin")
+
             
             # Set up process environment
             env = subprocess.os.environ.copy()
@@ -118,7 +115,6 @@ class AgentSupervisor:
             # Start process
             agent_proc.process = subprocess.Popen(
                 cmd,
-                stdin=subprocess.PIPE,  # Enable stdin for commands
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
@@ -225,31 +221,21 @@ class AgentSupervisor:
         self.logger.info(f"Stopping agent {agent_name}")
         
         try:
-            # First try socket shutdown if in socket mode
-            if self.use_sockets:
-                socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
-                if os.path.exists(socket_path):
-                    try:
-                        reader, writer = await asyncio.open_unix_connection(socket_path)
-                        cmd = {"cmd": "shutdown"}
-                        writer.write(json.dumps(cmd).encode() + b'\n')
-                        await writer.drain()
-                        response = await reader.readline()
-                        writer.close()
-                        await writer.wait_closed()
-                        # Give agent time to shutdown gracefully
-                        await asyncio.sleep(1.0)
-                    except Exception as e:
-                        self.logger.warning(f"Socket shutdown failed: {e}")
-            
-            # Try stdin shutdown for legacy mode
-            elif agent_proc.process.stdin:
+            # Try socket shutdown
+            socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+            if os.path.exists(socket_path):
                 try:
-                    agent_proc.process.stdin.write(b"SHUTDOWN\n")
-                    agent_proc.process.stdin.flush()
-                    await asyncio.sleep(0.5)
-                except:
-                    pass
+                    reader, writer = await asyncio.open_unix_connection(socket_path)
+                    cmd = {"cmd": "shutdown"}
+                    writer.write(json.dumps(cmd).encode() + b'\n')
+                    await writer.drain()
+                    response = await reader.readline()
+                    writer.close()
+                    await writer.wait_closed()
+                    # Give agent time to shutdown gracefully
+                    await asyncio.sleep(1.0)
+                except Exception as e:
+                    self.logger.warning(f"Socket shutdown failed: {e}")
             
             # Check if process exited gracefully
             retcode = agent_proc.process.poll()
@@ -304,9 +290,8 @@ class AgentSupervisor:
         self.logger.info("Waiting for all agents to be ready...")
         await self._wait_for_all_ready()
         
-        # Phase 2: Tell all agents to connect to peers
-        self.logger.info("All agents ready, initiating peer connections...")
-        await self._connect_all_agents()
+        # Agents will connect via socket commands when needed
+        self.logger.info("All agents ready")
         
         # Start monitoring only if requested
         # When using health monitor, don't use the basic monitor loop
@@ -452,17 +437,7 @@ class AgentSupervisor:
             
             await asyncio.sleep(0.5)
     
-    async def _connect_all_agents(self):
-        """Send CONNECT command to all agents to initiate peer connections."""
-        for name, agent_proc in self.agents.items():
-            if agent_proc.status == "running" and agent_proc.process:
-                try:
-                    # Send CONNECT command to agent's stdin
-                    agent_proc.process.stdin.write(b"CONNECT\n")
-                    agent_proc.process.stdin.flush()
-                    self.logger.info(f"Sent CONNECT signal to {name}")
-                except Exception as e:
-                    self.logger.error(f"Failed to send CONNECT to {name}: {e}")
+
     
     async def connect(self, from_agent: str, to_agent: str, bidirectional: bool = False):
         """Connect one agent to another.

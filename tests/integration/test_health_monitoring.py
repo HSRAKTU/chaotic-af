@@ -18,7 +18,7 @@ async def test_health_monitoring_basic():
         failure_threshold=2,  # 2 failures before restart
         restart_delay=1.0
     )
-    supervisor = AgentSupervisor(use_sockets=True, health_config=health_config)
+    supervisor = AgentSupervisor( health_config=health_config)
     
     # Create test agent
     test_agent = AgentConfig(
@@ -67,7 +67,7 @@ async def test_auto_recovery():
         failure_threshold=2,  # 2 failures before restart
         restart_delay=0.5
     )
-    supervisor = AgentSupervisor(use_sockets=True, health_config=health_config)
+    supervisor = AgentSupervisor( health_config=health_config)
     
     # Create test agent
     test_agent = AgentConfig(
@@ -125,7 +125,7 @@ async def test_restart_limit():
         restart_delay=0.1,
         max_restarts=2  # Only allow 2 restarts
     )
-    supervisor = AgentSupervisor(use_sockets=True, health_config=health_config)
+    supervisor = AgentSupervisor( health_config=health_config)
     
     # Create test agent
     test_agent = AgentConfig(

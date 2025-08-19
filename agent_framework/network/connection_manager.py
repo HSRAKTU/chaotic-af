@@ -88,29 +88,9 @@ class ConnectionManager:
                     print(f"ConnectionManager: Connected {from_agent} -> {to_agent} via socket", file=sys.stderr, flush=True)
                     return True
             except Exception as e:
-                print(f"ConnectionManager: Socket failed, falling back to stdin: {e}", file=sys.stderr, flush=True)
-        
-        # Fall back to stdin
-        if agent_proc.process and agent_proc.process.stdin:
-            command = f"CONNECT:{to_agent}:{to_endpoint}\n"
-            try:
-                agent_proc.process.stdin.write(command.encode())
-                agent_proc.process.stdin.flush()
-                
-                # Mark connection as established
-                self.connections[(from_agent, to_agent)] = True
-                logger.info(f"Connected {from_agent} -> {to_agent}")
-                print(f"ConnectionManager: Sent connect command from {from_agent} to {to_agent} ({to_endpoint})", flush=True)
-                return True
-                
-            except Exception as e:
-                logger.error(f"Failed to send connect command: {e}")
-                print(f"ConnectionManager: Failed to send connect command to {from_agent}: {e}", file=sys.stderr, flush=True)
+                print(f"ConnectionManager: Socket connection failed: {e}", file=sys.stderr, flush=True)
+                logger.error(f"Failed to send connect command via socket: {e}")
                 return False
-        else:
-            print(f"ConnectionManager: Agent {from_agent} process or stdin not available", file=sys.stderr, flush=True)
-        
-        return False
     
     def get_connections(self) -> Dict[Tuple[str, str], bool]:
         """Get all established connections."""

@@ -24,12 +24,7 @@ def test_supervisor_creation():
     supervisor = AgentSupervisor()
     
     assert supervisor.agents == {}
-    assert supervisor.use_sockets is True  # Default
     assert supervisor._monitor_task is None
-    
-    # With socket mode disabled
-    supervisor = AgentSupervisor(use_sockets=False)
-    assert supervisor.use_sockets is False
 
 
 def test_add_agent(test_config):
@@ -48,7 +43,7 @@ def test_add_agent(test_config):
 @pytest.mark.asyncio
 async def test_start_agent_socket_mode(test_config):
     """Test starting an agent with socket mode."""
-    supervisor = AgentSupervisor(use_sockets=True)
+    supervisor = AgentSupervisor()
     supervisor.add_agent(test_config)
     
     # Mock subprocess
@@ -68,8 +63,7 @@ async def test_start_agent_socket_mode(test_config):
             mock_popen.assert_called_once()
             args = mock_popen.call_args[0][0]
             
-            # Should NOT have --use-stdin flag (socket mode is default)
-            assert "--use-stdin" not in args
+            # Socket mode is the only mode now
             assert "agent_framework.network.agent_runner" in " ".join(args)
             
             # Verify agent status
@@ -84,27 +78,6 @@ async def test_start_agent_socket_mode(test_config):
             )
 
 
-@pytest.mark.asyncio
-async def test_start_agent_stdin_mode(test_config):
-    """Test starting an agent with stdin mode."""
-    supervisor = AgentSupervisor(use_sockets=False)
-    supervisor.add_agent(test_config)
-    
-    # Mock subprocess
-    with patch('agent_framework.network.supervisor.subprocess.Popen') as mock_popen:
-        mock_process = MagicMock()
-        mock_process.poll.return_value = None
-        mock_process.pid = 12345
-        mock_popen.return_value = mock_process
-        
-        with patch.object(supervisor.connection_manager, 'register_agent'):
-            success = await supervisor.start_agent("test_agent", monitor_output=False)
-            
-            assert success is True
-            
-            # Verify subprocess was started with --use-stdin flag
-            args = mock_popen.call_args[0][0]
-            assert "--use-stdin" in args
 
 
 @pytest.mark.asyncio

@@ -84,33 +84,7 @@ async def test_connect_agents_via_socket():
             assert b'"endpoint": "http://localhost:8002/mcp"' in sent_data
 
 
-@pytest.mark.asyncio
-async def test_connect_agents_fallback_to_stdin():
-    """Test falling back to stdin when socket not available."""
-    manager = ConnectionManager()
-    
-    # Register agents
-    manager.register_agent("alice", 8001)
-    manager.register_agent("bob", 8002)
-    
-    # Create mock agent processes
-    mock_stdin = MagicMock()
-    mock_agent_procs = {
-        "alice": MagicMock(process=MagicMock(stdin=mock_stdin)),
-        "bob": MagicMock(process=MagicMock(stdin=MagicMock()))
-    }
-    
-    # Mock os.path.exists to return False (no socket)
-    with patch('os.path.exists', return_value=False):
-        success = await manager.connect_agents("alice", "bob", mock_agent_procs)
-        
-        assert success is True
-        assert ("alice", "bob") in manager.connections
-        
-        # Verify stdin was used
-        mock_stdin.write.assert_called_once()
-        sent_data = mock_stdin.write.call_args[0][0]
-        assert b"CONNECT:bob:http://localhost:8002/mcp\n" == sent_data
+
 
 
 @pytest.mark.asyncio
