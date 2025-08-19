@@ -3,16 +3,17 @@
 import asyncio
 import psutil
 import time
+import pytest
 from agent_framework import AgentSupervisor, AgentConfig
 
 
+@pytest.mark.asyncio
 async def test_cpu_usage():
     """Test that socket mode fixes CPU usage."""
     print("Testing CPU usage fix...")
     
     # Create supervisor with socket mode
-    supervisor = AgentSupervisor()
-    supervisor.use_sockets = True
+    supervisor = AgentSupervisor(use_sockets=True)
     
     # Create test agent
     alice = AgentConfig(
