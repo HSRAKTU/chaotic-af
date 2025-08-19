@@ -69,6 +69,20 @@ class AgentControlSocket:
                 # Schedule socket cleanup after response
                 asyncio.create_task(self._cleanup_socket())
             
+            elif cmd['cmd'] == 'metrics':
+                # Return metrics in requested format
+                format_type = cmd.get('format', 'json')
+                
+                if hasattr(self.agent, 'metrics_collector'):
+                    if format_type == 'prometheus':
+                        metrics_text = self.agent.metrics_collector.get_metrics_prometheus()
+                        response = {'metrics': metrics_text}
+                    else:
+                        metrics_json = self.agent.metrics_collector.get_metrics_json()
+                        response = {'metrics': metrics_json}
+                else:
+                    response = {'error': 'Metrics not available'}
+            
             else:
                 response = {'error': f"Unknown command: {cmd['cmd']}"}
             

@@ -18,6 +18,7 @@ from ..core.logging import AgentLogger
 from ..core.llm import create_llm_provider, ToolCall
 from ..mcp.server_universal import UniversalAgentMCPServer
 from ..mcp.client import AgentMCPClient
+from ..core.metrics import MetricsCollector, AgentMetrics
 
 
 class Agent:
@@ -70,6 +71,10 @@ class Agent:
             logger=self.logger,
             mcp_client=self.mcp_client
         )
+        
+        # Initialize metrics
+        self.metrics_collector = MetricsCollector()
+        self.metrics = AgentMetrics(self.metrics_collector)
         
         # Track if agent is running
         self.is_running = False

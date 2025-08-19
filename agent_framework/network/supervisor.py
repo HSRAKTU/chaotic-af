@@ -14,6 +14,7 @@ import sys
 import json
 import signal
 import os
+import time
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +24,7 @@ from ..core.config import AgentConfig
 from ..core.logging import AgentLogger
 from .connection_manager import ConnectionManager
 from ..core.health import HealthMonitor, HealthConfig
+from ..core.metrics import MetricsCollector, AgentMetrics
 
 
 @dataclass
@@ -69,6 +71,10 @@ class AgentSupervisor:
         
         # Initialize health monitor
         self.health_monitor = HealthMonitor(self, health_config)
+        
+        # Initialize metrics
+        self.metrics_collector = MetricsCollector()
+        self.metrics = AgentMetrics(self.metrics_collector)
     
     def add_agent(self, config: AgentConfig):
         """Add an agent to be supervised."""
@@ -127,6 +133,10 @@ class AgentSupervisor:
             self.logger.info(
                 f"Started agent {agent_name} (PID: {agent_proc.pid})"
             )
+            
+            # Update metrics
+            self.metrics.set_agent_up(agent_name, True)
+            self.metrics.set_agent_start_time(agent_name, time.time())
             
             # Register agent with connection manager
             self.connection_manager.register_agent(agent_name, agent_proc.config.port)
@@ -268,6 +278,9 @@ class AgentSupervisor:
             agent_proc.process = None
             agent_proc.pid = None
             agent_proc.is_ready = False
+            
+            # Update metrics
+            self.metrics.set_agent_up(agent_name, False)
             
             self.logger.info(f"Agent {agent_name} stopped")
             
