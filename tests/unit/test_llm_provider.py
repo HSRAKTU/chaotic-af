@@ -70,7 +70,7 @@ async def test_openai_provider_complete():
     
     assert isinstance(response, LLMResponse)
     assert response.content == "Test response"
-    assert response.tool_calls is None
+    assert response.tool_calls == []  # Empty list when no tool calls
 
 
 @pytest.mark.asyncio
@@ -78,7 +78,11 @@ async def test_anthropic_provider_complete():
     """Test Anthropic provider complete method."""
     mock_client = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text="Test response")]
+    # Mock content block with type and text attributes
+    mock_block = MagicMock()
+    mock_block.type = "text"
+    mock_block.text = "Test response"
+    mock_response.content = [mock_block]
     
     mock_client.messages.create = AsyncMock(return_value=mock_response)
     

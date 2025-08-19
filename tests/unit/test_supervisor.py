@@ -133,10 +133,8 @@ async def test_stop_agent(test_config):
             
             await supervisor.stop_agent("test_agent")
         
-        # Should send SHUTDOWN via stdin first
-        mock_process.stdin.write.assert_called_with(b"SHUTDOWN\n")
-        
-        # Should call kill at least once
+        # In socket mode (default), stdin shutdown is not used
+        # Should call kill for process termination
         assert mock_kill.called
 
 

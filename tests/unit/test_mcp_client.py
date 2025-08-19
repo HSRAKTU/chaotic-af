@@ -42,11 +42,14 @@ async def test_add_connection(mock_dependencies):
         mock_client = AsyncMock()
         mock_client_class.return_value = mock_client
         
-        # Mock successful connection
-        mock_client.connect = AsyncMock()
-        mock_client.list_tools = AsyncMock(return_value=[
-            {"name": "test_tool", "description": "A test tool"}
-        ])
+        # Mock successful connection using context manager
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        
+        # Mock list_tools to return tool objects with name attribute
+        mock_tool = MagicMock()
+        mock_tool.name = "test_tool"
+        mock_client.list_tools = AsyncMock(return_value=[mock_tool])
         
         # Add connection
         success = await client.add_connection("other_agent", "http://localhost:8000/mcp")
@@ -56,8 +59,8 @@ async def test_add_connection(mock_dependencies):
         assert client.connections["other_agent"].url == "http://localhost:8000/mcp"
         
         # Verify client was initialized and connected
-        mock_client_class.assert_called_once_with(server_url="http://localhost:8000/mcp")
-        mock_client.connect.assert_called_once()
+        mock_client_class.assert_called_once_with("http://localhost:8000/mcp")
+        mock_client.__aenter__.assert_called_once()
         mock_client.list_tools.assert_called_once()
 
 
@@ -72,16 +75,18 @@ async def test_add_connection_failure(mock_dependencies):
         mock_client_class.return_value = mock_client
         
         # Mock connection failure
-        mock_client.connect = AsyncMock(side_effect=Exception("Connection failed"))
+        mock_client.__aenter__ = AsyncMock(side_effect=Exception("Connection failed"))
         
         # Try to add connection
         success = await client.add_connection("other_agent", "http://localhost:8000/mcp")
         
         assert success is False
-        assert "other_agent" not in client.connections
+        # Connection object is created but marked as not connected
+        assert "other_agent" in client.connections
+        assert not client.connections["other_agent"].connected
         
         # Logger should have been called with error
-        logger.error.assert_called()
+        logger.log_error.assert_called()
 
 
 @pytest.mark.asyncio
@@ -124,12 +129,15 @@ async def test_call_tool_not_connected(mock_dependencies):
     event_stream, logger = mock_dependencies
     client = AgentMCPClient("test_agent", event_stream, logger)
     
-    with pytest.raises(ValueError, match="Not connected to server"):
-        await client.call_tool(
-            server_name="non_existent",
-            tool_name="test_tool",
-            arguments={}
-        )
+    # Should return error dict instead of raising exception
+    result = await client.call_tool(
+        server_name="non_existent",
+        tool_name="test_tool",
+        arguments={}
+    )
+    
+    assert "error" in result
+    assert "No connection to server" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -138,35 +146,39 @@ async def test_communicate_with_agent(mock_dependencies):
     event_stream, logger = mock_dependencies
     client = AgentMCPClient("test_agent", event_stream, logger)
     
-    # Mock connection and tool call
-    with patch.object(client, 'call_tool') as mock_call_tool:
-        mock_response = MagicMock()
-        mock_response.data = {
-            "response": "Hello from other agent",
+    # Mock connection
+    mock_conn = MagicMock()
+    mock_conn.connected = True
+    mock_conn.is_agent = True
+    
+    # Mock the client's call_tool method
+    mock_client = AsyncMock()
+    mock_response = {
+        "response": "Hello from other agent",
+        "conversation_id": "123"
+    }
+    mock_client.call_tool = AsyncMock(return_value=mock_response)
+    mock_conn.client = mock_client
+    
+    # Add mock connection
+    client.connections["other_agent"] = mock_conn
+    
+    # Communicate
+    result = await client.communicate_with_agent(
+        target_agent="other_agent",
+        message="Hello",
+        conversation_id="123"
+    )
+    
+    assert result == mock_response
+    mock_client.call_tool.assert_called_once_with(
+        "communicate_with_agent",
+        {
+            "from_agent": "test_agent",
+            "message": "Hello",
             "conversation_id": "123"
         }
-        mock_call_tool.return_value = mock_response
-        
-        # Add mock connection
-        client.connections["other_agent"] = MagicMock()
-        
-        # Communicate
-        result = await client.communicate_with_agent(
-            target_agent="other_agent",
-            message="Hello",
-            conversation_id="123"
-        )
-        
-        assert result == mock_response
-        mock_call_tool.assert_called_once_with(
-            server_name="other_agent",
-            tool_name="communicate_with_agent",
-            arguments={
-                "source_agent": "test_agent",
-                "message": "Hello",
-                "conversation_id": "123"
-            }
-        )
+    )
 
 
 @pytest.mark.asyncio
@@ -177,12 +189,14 @@ async def test_close_all_connections(mock_dependencies):
     
     # Create mock connections
     mock_conn1 = MagicMock()
+    mock_conn1.connected = True
     mock_conn1.client = AsyncMock()
-    mock_conn1.client.close = AsyncMock()
+    mock_conn1.client.__aexit__ = AsyncMock()
     
     mock_conn2 = MagicMock()
+    mock_conn2.connected = True
     mock_conn2.client = AsyncMock()
-    mock_conn2.client.close = AsyncMock()
+    mock_conn2.client.__aexit__ = AsyncMock()
     
     client.connections = {
         "agent1": mock_conn1,
@@ -193,6 +207,6 @@ async def test_close_all_connections(mock_dependencies):
     await client.close_all()
     
     # Verify all connections were closed
-    mock_conn1.client.close.assert_called_once()
-    mock_conn2.client.close.assert_called_once()
+    mock_conn1.client.__aexit__.assert_called_once_with(None, None, None)
+    mock_conn2.client.__aexit__.assert_called_once_with(None, None, None)
     assert len(client.connections) == 0
