@@ -22,6 +22,7 @@ import psutil
 from ..core.config import AgentConfig
 from ..core.logging import AgentLogger
 from .connection_manager import ConnectionManager
+from ..core.health import HealthMonitor, HealthConfig
 
 
 @dataclass
@@ -46,11 +47,12 @@ class AgentSupervisor:
     - Resource management
     """
     
-    def __init__(self, log_dir: str = "logs", use_sockets: bool = True):
+    def __init__(self, log_dir: str = "logs", use_sockets: bool = True, health_config: Optional[HealthConfig] = None):
         self.agents: Dict[str, AgentProcess] = {}
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(exist_ok=True)
         self.use_sockets = use_sockets  # Default to socket mode
+        self.health_config = health_config  # Store for later use
         
         # Supervisor's own logger
         self.logger = AgentLogger(
@@ -64,6 +66,9 @@ class AgentSupervisor:
         
         # Initialize connection manager
         self.connection_manager = ConnectionManager()
+        
+        # Initialize health monitor
+        self.health_monitor = HealthMonitor(self, health_config)
     
     def add_agent(self, config: AgentConfig):
         """Add an agent to be supervised."""
@@ -291,12 +296,20 @@ class AgentSupervisor:
         await self._connect_all_agents()
         
         # Start monitoring only if requested
-        if monitor and not self._monitor_task:
+        # When using health monitor, don't use the basic monitor loop
+        if monitor and not self._monitor_task and not self.health_config:
             self._monitor_task = asyncio.create_task(self._monitor_loop())
+            
+        # Start health monitoring if configured
+        if self.health_config:
+            await self.health_monitor.start()
     
     async def stop_all(self):
         """Stop all running agents gracefully."""
         self.logger.info("Stopping all agents")
+        
+        # Stop health monitoring first
+        await self.health_monitor.stop()
         
         # Signal monitor to stop
         self._shutdown_event.set()
@@ -386,6 +399,10 @@ class AgentSupervisor:
                     pass
         
         return status
+    
+    def get_health_status(self) -> Dict[str, Dict]:
+        """Get health status of all agents."""
+        return self.health_monitor.get_health_status()
     
     async def restart_agent(self, agent_name: str):
         """Restart a specific agent."""
