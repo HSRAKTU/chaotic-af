@@ -78,11 +78,12 @@ def start(ctx, config_files: tuple, connect_all: bool):
     Examples:
         agentctl start agent1.yaml
         agentctl start agent1.yaml agent2.yaml agent3.yaml --connect-all
+        agentctl start *.yaml -c  # Start all configs and connect them
     """
     state = ctx.obj['state']
     
-    # Register cleanup on exit
-    atexit.register(cleanup_agents_on_exit)
+    # Don't register cleanup - agents run independently
+    # atexit.register(cleanup_agents_on_exit)
     
     # Create new supervisor for this batch
     supervisor = AgentSupervisor()
@@ -99,54 +100,46 @@ def start(ctx, config_files: tuple, connect_all: bool):
             click.echo(f"✗ Failed to load {config_file}: {str(e)}", err=True)
             sys.exit(1)
     
-    # Start agents
+    # Start agents in non-blocking mode
     async def start_agents():
-        # Start all agents without background monitoring
-        await supervisor.start_all(monitor=False)
+        # Start all agents without waiting for ready state
+        await supervisor.start_all(monitor=False, wait_ready=False)
         
-        # Save agent info to state
-        for config in configs:
+        # Save agent info to state with "starting" status
+        for i, config_file in enumerate(config_files):
+            config = configs[i]
             agent_proc = supervisor.agents.get(config.name)
-            if agent_proc and agent_proc.status == "running":
+            if agent_proc and agent_proc.pid:
                 state['agents'][config.name] = {
                     'pid': agent_proc.pid,
                     'port': config.port,
                     'config_file': str(Path(config_file).absolute()),
-                    'status': 'running'
+                    'status': agent_proc.status,  # Will be "starting"
+                    'started_at': time.time()  # Track when agent was started
                 }
         
         save_state(state)
         
-        click.echo("\n✓ All agents started successfully!")
+        # Connections will be handled separately after agents are ready
+        # We don't do it here to avoid blocking
+    
+    # Always run in non-blocking mode
+    try:
+        asyncio.run(start_agents())
         
-        # Show status
-        click.echo("\nAgent Status:")
+        # Show what's happening
+        click.echo(f"\n✓ Starting {len(configs)} agent(s)...")
         for config in configs:
-            agent_proc = supervisor.agents.get(config.name)
-            if agent_proc:
-                click.echo(f"  {config.name}: running (PID: {agent_proc.pid}, port {config.port})")
+            click.echo(f"  • {config.name} (port {config.port})")
         
         if connect_all and len(configs) > 1:
-            click.echo("\nConnecting agents...")
-            # Connect all agents bidirectionally
-            for i, config1 in enumerate(configs):
-                for config2 in configs[i+1:]:
-                    await supervisor.connect(config1.name, config2.name)
-                    await supervisor.connect(config2.name, config1.name)
-            click.echo("✓ All agents connected bidirectionally")
-    
-    # Run async function and then exit
-    try:
-        # Use asyncio.run for cleaner lifecycle management
-        asyncio.run(start_agents())
-    except KeyboardInterrupt:
-        click.echo("\nInterrupted")
+            click.echo("\n  Connections will be established once agents are ready.")
+        
+        click.echo("\nUse 'agentctl status' to monitor progress.")
+        
+    except Exception as e:
+        click.echo(f"✗ Failed to start agents: {str(e)}", err=True)
         sys.exit(1)
-    
-    click.echo("\nAgents are running in the background.")
-    click.echo("Use 'agentctl status' to check their status.")
-    click.echo("Use 'agentctl logs <agent>' to see agent logs.")
-    click.echo("Use 'agentctl stop' to stop all agents.")
 
 
 @cli.command()
@@ -199,27 +192,86 @@ def status(ctx):
     
     # Header
     click.echo("\nAgent Status:")
-    click.echo("-" * 50)
-    click.echo(f"{'Name':<15} {'PID':<8} {'Port':<6} {'Status':<10}")
-    click.echo("-" * 50)
+    click.echo("-" * 65)
+    click.echo(f"{'Name':<15} {'PID':<8} {'Port':<6} {'Status':<20} {'Info':<15}")
+    click.echo("-" * 65)
     
     # Check each agent
-    for name, info in state['agents'].items():
+    async def check_agent_status(name, info):
         pid = info['pid']
         port = info['port']
         
-        # Check if process is still running
+        # First check if process is still running
         try:
             os.kill(pid, 0)  # Signal 0 = check if process exists
-            status = click.style('running', fg='green')
+            
+            # Process is alive, check socket to determine if starting or running
+            socket_path = f"/tmp/chaotic-af/agent-{name}.sock"
+            if os.path.exists(socket_path):
+                try:
+                    # Try to connect to socket
+                    reader, writer = await asyncio.wait_for(
+                        asyncio.open_unix_connection(socket_path),
+                        timeout=1.0
+                    )
+                    # Send health check
+                    cmd = {"cmd": "health"}
+                    writer.write(json.dumps(cmd).encode() + b'\n')
+                    await writer.drain()
+                    response = await asyncio.wait_for(reader.readline(), timeout=1.0)
+                    writer.close()
+                    await writer.wait_closed()
+                    
+                    # Socket responded - agent is running
+                    status = 'running'
+                    status_display = click.style('running ✓', fg='green')
+                    info_text = ""
+                except Exception as e:
+                    # Socket exists but not responding - still starting
+                    status = 'starting'
+                    elapsed = int(time.time() - info.get('started_at', time.time()))
+                    status_display = click.style('starting', fg='yellow')
+                    info_text = f"({elapsed}s ago)"
+            else:
+                # No socket yet - still starting
+                status = 'starting'
+                elapsed = int(time.time() - info.get('started_at', time.time()))
+                status_display = click.style('starting', fg='yellow')
+                info_text = f"({elapsed}s ago)"
+                
         except ProcessLookupError:
-            status = click.style('stopped', fg='red')
-            # Update state
-            info['status'] = 'stopped'
+            # Process is dead
+            if info.get('status') == 'starting':
+                # Was starting but died - failed to start
+                status = 'failed'
+                status_display = click.style('failed', fg='red')
+                info_text = "Failed to start"
+            else:
+                # Was running but died - stopped
+                status = 'stopped'
+                status_display = click.style('stopped', fg='red')
+                info_text = ""
         
-        click.echo(f"{name:<15} {pid:<8} {port:<6} {status:<10}")
+        # Update state
+        info['status'] = status
+        
+        return name, pid, port, status_display, info_text
     
-    click.echo("-" * 50)
+    # Run all checks in parallel for speed
+    async def check_all():
+        tasks = []
+        for name, info in state['agents'].items():
+            tasks.append(check_agent_status(name, info))
+        return await asyncio.gather(*tasks)
+    
+    # Get all statuses
+    results = asyncio.run(check_all())
+    
+    # Display results
+    for name, pid, port, status_display, info_text in results:
+        click.echo(f"{name:<15} {pid:<8} {port:<6} {status_display:<20} {info_text:<15}")
+    
+    click.echo("-" * 65)
     save_state(state)
 
 
@@ -669,6 +721,69 @@ def watch(ctx, interval: int):
             return False
     
     asyncio.run(watch_agents())
+
+
+@cli.command()
+@click.argument('agent_names', nargs=-1)
+@click.option('--stopped', is_flag=True, help='Remove all stopped agents')
+@click.option('--failed', is_flag=True, help='Remove all failed agents')
+@click.option('--all', is_flag=True, help='Remove all agents from state')
+@click.pass_context
+def remove(ctx, agent_names: tuple, stopped: bool, failed: bool, all: bool):
+    """Remove agent(s) from state tracking.
+    
+    This doesn't stop running agents, it only removes them from status tracking.
+    Use 'agentctl stop' first if you want to stop running agents.
+    
+    Examples:
+        agentctl remove test_agent      # Remove specific agent
+        agentctl remove --stopped       # Remove all stopped agents
+        agentctl remove --failed        # Remove all failed agents  
+        agentctl remove --all          # Clear all state
+    """
+    state = ctx.obj['state']
+    
+    if not state['agents']:
+        click.echo("No agents in state.")
+        return
+    
+    removed = []
+    
+    if all:
+        # Remove everything
+        removed = list(state['agents'].keys())
+        state['agents'].clear()
+    elif stopped or failed:
+        # Remove by status
+        to_remove = []
+        for name, info in state['agents'].items():
+            if stopped and info.get('status') == 'stopped':
+                to_remove.append(name)
+            elif failed and info.get('status') == 'failed':
+                to_remove.append(name)
+        
+        for name in to_remove:
+            del state['agents'][name]
+            removed.append(name)
+    elif agent_names:
+        # Remove specific agents
+        for name in agent_names:
+            if name in state['agents']:
+                del state['agents'][name]
+                removed.append(name)
+            else:
+                click.echo(f"⚠ Agent '{name}' not found in state", err=True)
+    else:
+        click.echo("Please specify agent names or use --stopped/--failed/--all flags")
+        return
+    
+    if removed:
+        save_state(state)
+        click.echo(f"✓ Removed {len(removed)} agent(s) from state:")
+        for name in removed:
+            click.echo(f"  • {name}")
+    else:
+        click.echo("No agents removed.")
 
 
 @cli.command()

@@ -113,10 +113,18 @@ class AgentSupervisor:
             env = subprocess.os.environ.copy()
             
             # Start process
+            # Use pipes for monitoring mode, DEVNULL for non-blocking mode
+            if monitor_output:
+                stdout = subprocess.PIPE
+                stderr = subprocess.PIPE
+            else:
+                stdout = subprocess.DEVNULL
+                stderr = subprocess.DEVNULL
+            
             agent_proc.process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=stdout,
+                stderr=stderr,
                 env=env,
                 # Important: start new process group for clean shutdown
                 preexec_fn=subprocess.os.setsid if sys.platform != "win32" else None,
@@ -124,7 +132,7 @@ class AgentSupervisor:
             )
             
             agent_proc.pid = agent_proc.process.pid
-            agent_proc.status = "running"
+            agent_proc.status = "starting"  # Initially starting, becomes running when socket ready
             
             self.logger.info(
                 f"Started agent {agent_name} (PID: {agent_proc.pid})"
@@ -140,9 +148,9 @@ class AgentSupervisor:
             # Start monitoring stdout/stderr in background 
             if monitor_output:
                 asyncio.create_task(self._monitor_agent_output(agent_name))
-            else:
-                # Even without monitoring, we need to consume output to prevent buffer blocking
-                asyncio.create_task(self._consume_agent_output(agent_name))
+            # If not monitoring, we don't create any tasks - this prevents blocking!
+            # Note: Agent output will go to pipe buffers. If agent produces lots of output,
+            # it might block. But our agents only print minimal output so this is fine.
             
             return True
             
@@ -175,6 +183,7 @@ class AgentSupervisor:
                         agent_proc = self.agents.get(agent_name)
                         if agent_proc:
                             agent_proc.is_ready = True
+                            agent_proc.status = "running"  # Update status when ready
         
         # Monitor both stdout and stderr
         if agent_proc.process.stdout:
@@ -203,6 +212,7 @@ class AgentSupervisor:
                 decoded = line.decode('utf-8', errors='replace').strip()
                 if decoded == "READY":
                     agent_proc.is_ready = True
+                    agent_proc.status = "running"  # Update status when ready
         
         if agent_proc.process.stdout:
             asyncio.create_task(
@@ -273,11 +283,12 @@ class AgentSupervisor:
         except Exception as e:
             self.logger.error(f"Error stopping agent {agent_name}: {e}")
     
-    async def start_all(self, monitor: bool = True):
+    async def start_all(self, monitor: bool = True, wait_ready: bool = True):
         """Start all registered agents with two-phase startup.
         
         Args:
             monitor: If True, start background monitoring. If False, just start agents.
+            wait_ready: If True, wait for agents to be ready. If False, return immediately.
         """
         self.logger.info("Starting all agents")
         
@@ -286,12 +297,14 @@ class AgentSupervisor:
             await self.start_agent(agent_name, monitor_output=monitor)
             await asyncio.sleep(0.5)  # Give each agent time to bind to port
         
-        # Wait for all agents to report READY
-        self.logger.info("Waiting for all agents to be ready...")
-        await self._wait_for_all_ready()
-        
-        # Agents will connect via socket commands when needed
-        self.logger.info("All agents ready")
+        if wait_ready:
+            # Wait for all agents to report READY
+            self.logger.info("Waiting for all agents to be ready...")
+            await self._wait_for_all_ready()
+            self.logger.info("All agents ready")
+        else:
+            # In non-blocking mode, agents are marked as "starting"
+            self.logger.info("All agents started in non-blocking mode")
         
         # Start monitoring only if requested
         # When using health monitor, don't use the basic monitor loop
