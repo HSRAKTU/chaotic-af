@@ -6,30 +6,34 @@
 ## Current System Architecture
 
 ### What We Have Built
-- Multi-agent framework using MCP (Model Context Protocol)
-- Agents communicate via HTTP/JSON-RPC
-- Each agent runs as a separate process
-- Dynamic connection system via supervisor
-- Gemini LLM integration with tool calling
+- Production-ready multi-agent framework using MCP
+- Zero-CPU overhead via Unix socket control plane
+- Health monitoring with auto-recovery
+- Prometheus metrics collection
+- Graceful shutdown and process management
 
 ### Key Components
-1. **AgentSupervisor**: Manages agent lifecycle
-2. **AgentMCPServer**: Each agent's server (FastMCP)
-3. **AgentMCPClient**: For agent-to-agent communication
-4. **ConnectionManager**: Tracks agent endpoints
+1. **AgentSupervisor**: Manages lifecycle with health monitoring
+2. **AgentControlSocket**: Zero-CPU control via Unix sockets
+3. **HealthMonitor**: Automatic recovery with configurable limits
+4. **MetricsCollector**: Prometheus-compatible metrics
+5. **UniversalAgentMCPServer**: Dynamic agent connections
+6. **ConnectionManager**: Runtime topology management
 
 ### Current Capabilities
-- ✅ CLI interface (`agentctl`) for agent management
-- ✅ Agent state tracking via ~/.chaotic-af/agents.json
-- ✅ Process-based agent isolation
-- ✅ Dynamic connection system
+- ✅ Rich CLI interface with `watch` command (like htop)
+- ✅ Real-time health monitoring and auto-recovery
+- ✅ Prometheus metrics exposed via socket
+- ✅ Graceful shutdown with proper cleanup
+- ✅ Process isolation with crash resilience
 - ✅ Structured logging with correlation IDs
+- ✅ Event streaming for all agent actions
 
-### What's Missing
-- No real-time visual monitoring
-- No web-based interface
-- No visual representation of agent topology
-- Hard to see message flow visually
+### What's Missing (UI-specific)
+- No web-based visual interface
+- No graphical agent topology view
+- No visual message flow
+- Metrics require external Prometheus/Grafana
 
 ## Proposed UI Architecture
 
