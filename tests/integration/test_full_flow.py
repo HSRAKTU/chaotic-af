@@ -35,8 +35,8 @@ async def test_full_agent_flow():
     supervisor.add_agent(bob)
     
     try:
-        # Start agents
-        await supervisor.start_all(monitor=False)
+        # Start agents with monitoring to get status updates
+        await supervisor.start_all(monitor=True)
         await asyncio.sleep(3)
         
         # Verify agents are running
