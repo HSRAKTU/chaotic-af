@@ -19,6 +19,7 @@ import os
 import signal
 import atexit
 import psutil
+import time
 
 from ..core.config import load_config, AgentConfig
 from ..network.supervisor import AgentSupervisor
@@ -399,6 +400,275 @@ def connect(ctx, from_agent: str, to_agent: str, bidirectional: bool):
     
     # Run the async connection
     asyncio.run(do_connect())
+
+
+@cli.command()
+@click.argument('agent_name')
+@click.pass_context
+def health(ctx, agent_name: str):
+    """Check health status of an agent.
+    
+    Example:
+        agentctl health alice
+    """
+    state = ctx.obj['state']
+    
+    if agent_name not in state['agents']:
+        click.echo(f"✗ Agent '{agent_name}' not found", err=True)
+        return
+    
+    async def check_health():
+        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+        
+        try:
+            if not os.path.exists(socket_path):
+                click.echo(f"✗ Agent '{agent_name}' socket not found", err=True)
+                return
+            
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            
+            # Send health command
+            cmd = {"cmd": "health"}
+            writer.write(json.dumps(cmd).encode() + b'\n')
+            await writer.drain()
+            
+            # Read response with timeout
+            response = await asyncio.wait_for(reader.readline(), timeout=5.0)
+            result = json.loads(response.decode())
+            
+            writer.close()
+            await writer.wait_closed()
+            
+            if result.get('status') == 'ready':
+                click.echo(f"✓ Agent '{agent_name}' is healthy")
+            else:
+                click.echo(f"✗ Agent '{agent_name}' is not healthy", err=True)
+                
+        except asyncio.TimeoutError:
+            click.echo(f"✗ Agent '{agent_name}' health check timed out", err=True)
+        except Exception as e:
+            click.echo(f"✗ Health check failed: {str(e)}", err=True)
+    
+    asyncio.run(check_health())
+
+
+@cli.command()
+@click.argument('agent_name')
+@click.option('--format', '-f', type=click.Choice(['json', 'prometheus']), default='json', help='Output format')
+@click.pass_context
+def metrics(ctx, agent_name: str, format: str):
+    """Get metrics from an agent.
+    
+    Examples:
+        agentctl metrics alice
+        agentctl metrics alice -f prometheus
+    """
+    state = ctx.obj['state']
+    
+    if agent_name not in state['agents']:
+        click.echo(f"✗ Agent '{agent_name}' not found", err=True)
+        return
+    
+    async def get_metrics():
+        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+        
+        try:
+            if not os.path.exists(socket_path):
+                click.echo(f"✗ Agent '{agent_name}' socket not found", err=True)
+                return
+            
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            
+            # Send metrics command
+            cmd = {"cmd": "metrics", "format": format}
+            writer.write(json.dumps(cmd).encode() + b'\n')
+            await writer.drain()
+            
+            # Read response
+            response = await reader.readline()
+            result = json.loads(response.decode())
+            
+            writer.close()
+            await writer.wait_closed()
+            
+            if 'metrics' in result:
+                if format == 'json':
+                    # Pretty print JSON
+                    import json
+                    click.echo(json.dumps(result['metrics'], indent=2))
+                else:
+                    # Prometheus format
+                    click.echo(result['metrics'])
+            else:
+                click.echo(f"✗ {result.get('error', 'Failed to get metrics')}", err=True)
+                
+        except Exception as e:
+            click.echo(f"✗ Failed to get metrics: {str(e)}", err=True)
+    
+    asyncio.run(get_metrics())
+
+
+@cli.command()
+@click.argument('agent_names', nargs=-1)
+@click.pass_context
+def restart(ctx, agent_names: tuple):
+    """Restart agent(s).
+    
+    Examples:
+        agentctl restart              # Restart all agents
+        agentctl restart alice        # Restart specific agent
+        agentctl restart alice bob
+    """
+    state = ctx.obj['state']
+    
+    agents_to_restart = agent_names if agent_names else list(state['agents'].keys())
+    
+    for name in agents_to_restart:
+        if name not in state['agents']:
+            click.echo(f"⚠ Agent '{name}' not found")
+            continue
+            
+        agent_info = state['agents'][name]
+        pid = agent_info['pid']
+        config_file = agent_info['config_file']
+        
+        # First stop the agent
+        try:
+            os.kill(pid, signal.SIGTERM)
+            click.echo(f"✓ Stopping agent '{name}' (PID: {pid})")
+            
+            # Wait a moment for graceful shutdown
+            import time
+            time.sleep(2)
+            
+        except ProcessLookupError:
+            click.echo(f"⚠ Agent '{name}' already stopped")
+        except Exception as e:
+            click.echo(f"✗ Failed to stop agent '{name}': {str(e)}", err=True)
+            continue
+        
+        # Start the agent again
+        try:
+            config = load_config(config_file)
+            supervisor = AgentSupervisor()
+            supervisor.add_agent(config)
+            
+            async def restart_agent():
+                await supervisor.start_agent(name, monitor_output=False)
+                
+                # Update state with new PID
+                agent_proc = supervisor.agents.get(name)
+                if agent_proc and agent_proc.status == "running":
+                    state['agents'][name]['pid'] = agent_proc.pid
+                    click.echo(f"✓ Restarted agent '{name}' (new PID: {agent_proc.pid})")
+                else:
+                    click.echo(f"✗ Failed to restart agent '{name}'", err=True)
+            
+            asyncio.run(restart_agent())
+            
+        except Exception as e:
+            click.echo(f"✗ Failed to restart agent '{name}': {str(e)}", err=True)
+    
+    save_state(state)
+
+
+@cli.command()
+@click.option('--interval', '-i', default=2, help='Update interval in seconds')
+@click.pass_context
+def watch(ctx, interval: int):
+    """Watch live status of all agents (like top/htop).
+    
+    Example:
+        agentctl watch
+        agentctl watch -i 5  # Update every 5 seconds
+    """
+    state = ctx.obj['state']
+    
+    if not state['agents']:
+        click.echo("No agents are currently running.")
+        return
+    
+    async def watch_agents():
+        """Continuously monitor agent status."""
+        try:
+            while True:
+                # Clear screen
+                click.clear()
+                
+                # Header
+                click.echo(click.style("Chaotic AF - Agent Monitor", fg='cyan', bold=True))
+                click.echo(f"Updated: {click.style(time.strftime('%Y-%m-%d %H:%M:%S'), fg='green')}")
+                click.echo("Press Ctrl+C to exit\n")
+                
+                # Table header
+                click.echo(f"{'Name':<15} {'PID':<8} {'Port':<6} {'Health':<10} {'Uptime':<15} {'Connections':<12}")
+                click.echo("-" * 80)
+                
+                # Check each agent
+                for name, info in state['agents'].items():
+                    pid = info['pid']
+                    port = info['port']
+                    
+                    # Check process status
+                    try:
+                        proc = psutil.Process(pid)
+                        status = click.style('●', fg='green')
+                        
+                        # Calculate uptime
+                        create_time = proc.create_time()
+                        uptime_seconds = time.time() - create_time
+                        hours = int(uptime_seconds // 3600)
+                        minutes = int((uptime_seconds % 3600) // 60)
+                        seconds = int(uptime_seconds % 60)
+                        uptime = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                        
+                    except psutil.NoSuchProcess:
+                        status = click.style('●', fg='red')
+                        uptime = "N/A"
+                    
+                    # Check health via socket
+                    health = await check_agent_health(name)
+                    health_status = click.style('healthy', fg='green') if health else click.style('unhealthy', fg='red')
+                    
+                    # Get connection count (placeholder - would need metrics)
+                    connections = "N/A"
+                    
+                    click.echo(f"{name:<15} {pid:<8} {port:<6} {status} {health_status:<10} {uptime:<15} {connections:<12}")
+                
+                click.echo("-" * 80)
+                click.echo(f"\nLegend: {click.style('●', fg='green')} Running  {click.style('●', fg='red')} Stopped")
+                
+                # Wait for next update
+                await asyncio.sleep(interval)
+                
+        except KeyboardInterrupt:
+            click.echo("\n\nExiting monitor...")
+    
+    async def check_agent_health(agent_name: str) -> bool:
+        """Quick health check for an agent."""
+        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+        
+        try:
+            if not os.path.exists(socket_path):
+                return False
+                
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            cmd = {"cmd": "health"}
+            writer.write(json.dumps(cmd).encode() + b'\n')
+            await writer.drain()
+            
+            response = await asyncio.wait_for(reader.readline(), timeout=1.0)
+            result = json.loads(response.decode())
+            
+            writer.close()
+            await writer.wait_closed()
+            
+            return result.get('status') == 'ready'
+            
+        except:
+            return False
+    
+    asyncio.run(watch_agents())
 
 
 @cli.command()
