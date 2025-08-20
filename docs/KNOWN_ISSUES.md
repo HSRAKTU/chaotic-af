@@ -19,22 +19,59 @@ python -m agent_framework.network.agent_runner --use-stdin --config "..."
 ### Note
 Windows support is not a current priority. Community contributions welcome.
 
-## Legacy Stdin Code
+## Current Active Issues
 
-### Issue
-Stdin-based control code is still present for backward compatibility.
+### 1. Socket API Code Duplication
 
-### Impact
-- Adds complexity to codebase
-- Maintenance burden for legacy path
+#### Issue
+Same socket communication code duplicated across multiple modules.
 
-### Current State
-- Socket mode is default and recommended
-- Stdin mode available via `--use-stdin` flag
-- All new features use socket mode
+#### Impact
+- Violates DRY principle
+- Maintenance burden
+- Potential for inconsistent behavior
 
-### Planned
-Will be removed after validation period.
+#### Locations
+- CLI `connect` command (cli/commands.py:381-454)
+- CLI `status` command (cli/commands.py:200-230)
+- ConnectionManager (network/connection_manager.py:69-93)
+- Supervisor._wait_for_all_ready (network/supervisor.py:448-456)
+
+#### Proposed Solution
+Create unified `AgentSocketClient` class in framework layer that both CLI and library can use.
+
+### 2. Chat Command Implementation
+
+#### Issue
+Chat command partially implemented but not working correctly with MCP tool access.
+
+#### Impact
+- Users cannot interact with agents via CLI chat
+- MCP tool integration from control socket is complex
+
+#### Current State
+- Basic chat handler exists in control_socket.py
+- Needs proper integration with MCP infrastructure
+- Tool access (contact_agent) not working from chat context
+
+#### Decision
+Postponed to maintain code clarity and avoid fragile workarounds.
+
+### 3. Windows Compatibility
+
+#### Issue
+Unix domain sockets are not available on Windows.
+
+#### Impact
+- Framework doesn't work on Windows at all (stdin mode removed)
+- Windows users cannot use the framework
+
+#### Current State
+- Unix sockets are the only IPC mechanism
+- No Windows alternative implemented
+
+#### Note
+Windows support is not a current priority. Community contributions welcome.
 
 ## Fixed Issues ✅
 
@@ -67,6 +104,21 @@ The following issues have been resolved:
 ### 7. **Dynamic Connections**
 - **Fixed**: Any topology, any agent names
 - **Solution**: Dynamic connection manager with runtime updates
+
+### 8. **Terminal Blocking on CLI Start** (Fixed August 19, 2025)
+- **Fixed**: CLI `start` command was blocking terminal, requiring Ctrl+C
+- **Root Cause**: `subprocess.PIPE` creates threads that prevent Python exit
+- **Solution**: Use `subprocess.DEVNULL` for non-monitoring mode
+
+### 9. **Library Mode Timeout** (Fixed August 19, 2025)
+- **Fixed**: Library example timing out with "Agents not ready after 30s"
+- **Root Cause**: Socket readiness check needed when stdout goes to DEVNULL
+- **Solution**: Modified `_wait_for_all_ready()` to check socket health
+
+### 10. **Stdin/Stdout Legacy Code** (Removed August 19, 2025)
+- **Fixed**: Complex dual-mode communication system removed
+- **Impact**: Simplified codebase, eliminated CPU spinning issues
+- **Solution**: Socket-only mode for all agent communication
 
 ## Performance Notes
 

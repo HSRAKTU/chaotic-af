@@ -695,6 +695,46 @@ After migration:
 2. **Process Isolation**: Each agent in separate process, clean crash boundaries
 3. **Supervisor Pattern**: Central manager with health monitoring
 4. **Clean Separation**: Control plane (sockets) vs data plane (MCP)
-5. **Graceful Degradation**: Falls back to stdin if needed
+5. **Socket-Only Design**: Simplified architecture with single IPC mechanism
+
+## Implementation Details (August 19, 2025)
+
+### subprocess.DEVNULL Usage
+When starting agents in non-monitoring mode, we use `subprocess.DEVNULL` for stdout/stderr:
+
+```python
+if monitor_output:
+    stdout = subprocess.PIPE
+    stderr = subprocess.PIPE
+else:
+    stdout = subprocess.DEVNULL
+    stderr = subprocess.DEVNULL
+```
+
+**Why This Matters**:
+- `subprocess.PIPE` creates background threads to read output
+- These threads prevent Python process from exiting cleanly
+- `DEVNULL` discards output at OS level, no threads created
+- Trade-off: No stdout capture, but we have logs and socket status
+
+### Socket-Based Readiness Detection
+Since stdout goes to DEVNULL, we can't rely on "READY" print statements:
+
+```python
+async def _wait_for_all_ready(self, timeout: int = 30):
+    # Check socket responsiveness instead of stdout
+    socket_path = f"/tmp/chaotic-af/agent-{name}.sock"
+    if os.path.exists(socket_path):
+        try:
+            reader, writer = await asyncio.open_unix_connection(socket_path)
+            # Socket responded - agent is ready
+            agent.is_ready = True
+            agent.status = "running"
+```
+
+### CLI vs Library Execution Models
+- **CLI**: Each command is a separate process that exits immediately
+- **Library**: Long-running process with persistent supervisor
+- **Shared**: Both use same socket API for agent communication
 
 The architecture is production-ready with all core and advanced features implemented. The system handles real-world scenarios including crashes, slow starts, and network issues.

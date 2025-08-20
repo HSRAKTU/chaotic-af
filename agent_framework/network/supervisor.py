@@ -432,19 +432,58 @@ class AgentSupervisor:
         start_time = asyncio.get_event_loop().time()
         
         while True:
+            # Check agents that are starting or running
+            agents_to_check = [
+                (name, agent) for name, agent in self.agents.items()
+                if agent.status in ["starting", "running"]
+            ]
+            
+            # Update status for agents that are ready
+            for name, agent in agents_to_check:
+                # If not already ready, check socket responsiveness
+                if not agent.is_ready and agent.status in ["starting", "running"]:
+                    socket_path = f"/tmp/chaotic-af/agent-{name}.sock"
+                    if os.path.exists(socket_path):
+                        try:
+                            # Try socket health check
+                            reader, writer = await asyncio.wait_for(
+                                asyncio.open_unix_connection(socket_path),
+                                timeout=1.0
+                            )
+                            cmd = {"cmd": "health"}
+                            writer.write(json.dumps(cmd).encode() + b'\n')
+                            await writer.drain()
+                            response = await asyncio.wait_for(reader.readline(), timeout=1.0)
+                            writer.close()
+                            await writer.wait_closed()
+                            
+                            # Socket responded - agent is ready
+                            agent.is_ready = True
+                            if agent.status == "starting":
+                                agent.status = "running"
+                                self.logger.debug(f"Agent {name} is now running")
+                        except Exception:
+                            # Socket not ready yet
+                            pass
+                
+                # Also update if marked ready from stdout monitoring
+                elif agent.is_ready and agent.status == "starting":
+                    agent.status = "running"
+                    self.logger.debug(f"Agent {name} is now running")
+            
+            # Check if all relevant agents are ready
             all_ready = all(
-                agent.is_ready for agent in self.agents.values()
-                if agent.status == "running"
+                agent.is_ready for _, agent in agents_to_check
             )
             
-            if all_ready:
+            if all_ready and agents_to_check:
                 self.logger.info("All agents are ready")
                 return
             
             if asyncio.get_event_loop().time() - start_time > timeout:
                 not_ready = [
-                    name for name, agent in self.agents.items()
-                    if agent.status == "running" and not agent.is_ready
+                    name for name, agent in agents_to_check
+                    if not agent.is_ready
                 ]
                 raise TimeoutError(f"Agents not ready after {timeout}s: {not_ready}")
             
