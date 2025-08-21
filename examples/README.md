@@ -48,6 +48,23 @@ python -m agent_framework.cli.commands chat customer_service -v "I'm having Pyth
 # customer_service ← tech_support: Here's how to fix import errors...
 ```
 
+## Featured Demo
+
+### 🎨 **UI-Specific: Software Development Team** (`ui-specific/`)
+**Most Impressive Demo** - 7-agent software development team with complex coordination:
+- Product Manager, Backend Dev, Frontend Dev, DevOps, QA, Security, Tech Lead
+- Realistic business automation workflow
+- Hybrid network topology (star + mesh + integration points)
+- Beautiful real-time animations with flowing message dots
+- Complete chaos mode - any agent can coordinate with any other agent
+
+```bash
+cd examples/ui-specific
+./setup_dev_team.sh      # Start 7 agents with complex topology
+python ../../ui_server.py # Start UI monitor
+# Open: http://localhost:8080 and test complex scenarios!
+```
+
 ## All Examples
 
 ### 1. Library Usage (`library_usage.py`)

@@ -154,7 +154,25 @@ python -m agent_framework.cli.commands chat customer_service -v "I need help wit
 # user ← customer_service: I've coordinated with our teams...
 ```
 
-### 5. Run More Demos
+### 5. Advanced UI Demo (Most Impressive!)
+
+**7-Agent Software Development Team with Real-Time Monitoring:**
+```bash
+# Start the impressive 7-agent software team demo
+cd examples/ui-specific
+./setup_dev_team.sh
+
+# Start beautiful UI monitor with animations
+pip install -r requirements-ui.txt
+python ../../ui_server.py
+
+# Open: http://localhost:8080
+# Test complex scenarios like:
+# "Implement user authentication with social login - coordinate with entire team"
+# Watch agents coordinate across departments with beautiful animations!
+```
+
+### 6. Other Demos
 
 ```bash
 # Simple demo - basic agent communication

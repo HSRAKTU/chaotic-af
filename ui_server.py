@@ -77,6 +77,44 @@ async def get_dashboard():
             height: 2px;
             transform-origin: left center;
             z-index: 1;
+            opacity: 0.3;
+            transition: all 0.3s ease;
+        }
+        
+        .connection-line.active {
+            background: #FFD700;
+            height: 4px;
+            opacity: 1;
+            box-shadow: 0 0 10px #FFD700;
+        }
+        
+        .connection-line.pulse {
+            animation: pulse 1s ease-in-out;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.3; transform: scaleY(1); }
+            50% { opacity: 1; transform: scaleY(2); box-shadow: 0 0 15px #FFD700; }
+            100% { opacity: 0.3; transform: scaleY(1); }
+        }
+        
+        /* Animated Message Flow Dots */
+        .message-dot {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #FFD700;
+            border-radius: 50%;
+            z-index: 5;
+            box-shadow: 0 0 10px #FFD700;
+            animation: flow 2s linear;
+        }
+        
+        @keyframes flow {
+            0% { transform: translateX(0) scale(0.5); opacity: 0; }
+            10% { opacity: 1; transform: scale(1); }
+            90% { opacity: 1; transform: scale(1); }
+            100% { transform: translateX(var(--flow-distance)) scale(0.5); opacity: 0; }
         }
         
         .connection-arrow {
@@ -87,6 +125,13 @@ async def get_dashboard():
             border-top: 4px solid transparent;
             border-bottom: 4px solid transparent;
             z-index: 2;
+            opacity: 0.3;
+            transition: all 0.3s ease;
+        }
+        
+        .connection-arrow.active {
+            border-left-color: #FFD700;
+            opacity: 1;
         }
         
         /* Events Panel */
@@ -116,8 +161,8 @@ async def get_dashboard():
             background: #1e1e1e;
             border-radius: 8px;
             font-family: 'Courier New', monospace;
-            font-size: 13px;
-            line-height: 1.4;
+            font-size: 16px;
+            line-height: 1.6;
         }
         
         .event { 
@@ -174,6 +219,7 @@ async def get_dashboard():
         const topologyDiv = document.getElementById('topology');
         
         let agents = {};
+        let agentPositions = {}; // Store agent node positions for animations
         let connections = new Set();
         let activeConnections = new Set(); // Track active message flows
         
@@ -281,20 +327,27 @@ async def get_dashboard():
         
         function renderTopology() {
             const agentNames = Object.keys(agents);
+            if (agentNames.length === 0) return;
+            
             const centerX = topologyDiv.offsetWidth / 2;
             const centerY = topologyDiv.offsetHeight / 2;
             const radius = Math.min(centerX, centerY) - 80;
             
             topologyDiv.innerHTML = '';
+            agentPositions = {}; // Reset positions
             
-            // Position agents in a circle
+            // Position agents in a circle and store positions
             agentNames.forEach((name, index) => {
                 const angle = (index / agentNames.length) * 2 * Math.PI;
                 const x = centerX + radius * Math.cos(angle) - 60;
                 const y = centerY + radius * Math.sin(angle) - 40;
                 
+                // Store position for animations
+                agentPositions[name] = { x: x + 60, y: y + 40 };
+                
                 const node = document.createElement('div');
                 node.className = `agent-node ${agents[name].status}`;
+                node.id = `agent-${name}`;
                 node.style.left = x + 'px';
                 node.style.top = y + 'px';
                 node.innerHTML = `
@@ -304,40 +357,40 @@ async def get_dashboard():
                 
                 node.onclick = () => highlightAgent(name);
                 topologyDiv.appendChild(node);
-                
-                // Draw connections to all other agents (mesh network)
-                agentNames.forEach((targetName, targetIndex) => {
-                    if (name !== targetName) {
-                        const targetAngle = (targetIndex / agentNames.length) * 2 * Math.PI;
-                        const targetX = centerX + radius * Math.cos(targetAngle);
-                        const targetY = centerY + radius * Math.sin(targetAngle);
-                        
-                        drawConnection(x + 60, y + 40, targetX, targetY, name, targetName);
-                    }
-                });
             });
+            
+            // Only draw actual connections (will be populated by connection events)
+            // Connections will be drawn dynamically when we detect them from agent events
+            // This prevents the "all-to-all" visual mess
         }
         
-        function drawConnection(x1, y1, x2, y2, fromAgent, toAgent) {
+        function drawConnection(fromAgent, toAgent) {
+            if (!agentPositions[fromAgent] || !agentPositions[toAgent]) return;
+            
+            const x1 = agentPositions[fromAgent].x;
+            const y1 = agentPositions[fromAgent].y;
+            const x2 = agentPositions[toAgent].x;
+            const y2 = agentPositions[toAgent].y;
+            
             const length = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
             const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
             
             // Connection line
             const line = document.createElement('div');
             line.className = 'connection-line';
+            line.id = `line-${fromAgent}-${toAgent}`;
             line.style.left = x1 + 'px';
             line.style.top = y1 + 'px';
             line.style.width = length + 'px';
             line.style.transform = `rotate(${angle}deg)`;
-            line.style.opacity = '0.3';
             
             // Arrow for bidirectional
             const arrow = document.createElement('div');
             arrow.className = 'connection-arrow';
+            arrow.id = `arrow-${fromAgent}-${toAgent}`;
             arrow.style.left = (x1 + x2) / 2 + 'px';
             arrow.style.top = (y1 + y2) / 2 + 'px';
             arrow.style.transform = `rotate(${angle}deg)`;
-            arrow.style.opacity = '0.3';
             
             topologyDiv.appendChild(line);
             topologyDiv.appendChild(arrow);
@@ -350,15 +403,99 @@ async def get_dashboard():
                 if (tool.startsWith('communicate_with_')) {
                     const target = eventData.data.target;
                     const from = eventData.agent_id;
-                    highlightConnection(from, target, 'outgoing');
+                    
+                    // Ensure connection line exists (draw it if not already drawn)
+                    ensureConnectionExists(from, target);
+                    
+                    // Animate message flow from sender to receiver
+                    createFlowingDot(from, target);
+                    highlightConnection(from, target);
+                    pulseAgent(from, '#4CAF50'); // Green for sending
                 }
             } else if (eventData.event_type === 'tool_call_response') {
                 const tool = eventData.data.tool || '';
                 if (tool.startsWith('communicate_with_')) {
                     const target = eventData.data.target;
                     const from = eventData.agent_id;
-                    highlightConnection(target, from, 'incoming');
+                    
+                    // Animate response flow back
+                    const responseAgent = eventData.data.response?.agent || target;
+                    ensureConnectionExists(responseAgent, from);
+                    createFlowingDot(responseAgent, from);
+                    highlightConnection(responseAgent, from);
+                    pulseAgent(from, '#2196F3'); // Blue for receiving
                 }
+            }
+        }
+        
+        function ensureConnectionExists(fromAgent, toAgent) {
+            // Only draw connection if it doesn't already exist
+            const lineId = `line-${fromAgent}-${toAgent}`;
+            if (!document.getElementById(lineId)) {
+                drawConnection(fromAgent, toAgent);
+            }
+        }
+        
+        function createFlowingDot(fromAgent, toAgent) {
+            if (!agentPositions[fromAgent] || !agentPositions[toAgent]) return;
+            
+            const x1 = agentPositions[fromAgent].x;
+            const y1 = agentPositions[fromAgent].y;
+            const x2 = agentPositions[toAgent].x;
+            const y2 = agentPositions[toAgent].y;
+            
+            const dot = document.createElement('div');
+            dot.className = 'message-dot';
+            dot.style.left = x1 + 'px';
+            dot.style.top = y1 + 'px';
+            dot.style.setProperty('--flow-distance', `${Math.sqrt((x2-x1)**2 + (y2-y1)**2)}px`);
+            
+            const angle = Math.atan2(y2 - y1, x2 - x1) * 180 / Math.PI;
+            dot.style.transform = `rotate(${angle}deg)`;
+            
+            topologyDiv.appendChild(dot);
+            
+            // Remove dot after animation
+            setTimeout(() => {
+                if (dot.parentNode) {
+                    topologyDiv.removeChild(dot);
+                }
+            }, 2000);
+        }
+        
+        function highlightConnection(from, to) {
+            // Highlight the connection line
+            const lineId = `line-${from}-${to}`;
+            const arrowId = `arrow-${from}-${to}`;
+            
+            const line = document.getElementById(lineId);
+            const arrow = document.getElementById(arrowId);
+            
+            if (line) {
+                line.classList.add('active');
+                line.classList.add('pulse');
+                setTimeout(() => {
+                    line.classList.remove('active', 'pulse');
+                }, 1500);
+            }
+            
+            if (arrow) {
+                arrow.classList.add('active');
+                setTimeout(() => {
+                    arrow.classList.remove('active');
+                }, 1500);
+            }
+        }
+        
+        function pulseAgent(agentName, color) {
+            const agent = document.getElementById(`agent-${agentName}`);
+            if (agent) {
+                agent.style.boxShadow = `0 0 20px ${color}`;
+                agent.classList.add('active');
+                setTimeout(() => {
+                    agent.style.boxShadow = '';
+                    agent.classList.remove('active');
+                }, 1000);
             }
         }
         
@@ -367,12 +504,11 @@ async def get_dashboard():
             document.querySelectorAll('.agent-node').forEach(node => {
                 node.classList.remove('active');
             });
-            document.querySelector(`.agent-node:contains('${name}')`).classList.add('active');
-        }
-        
-        function highlightConnection(from, to, direction) {
-            // Add visual pulse to connection lines during message flow
-            console.log(`Connection: ${from} → ${to} (${direction})`);
+            const targetAgent = document.getElementById(`agent-${name}`);
+            if (targetAgent) {
+                targetAgent.classList.add('active');
+                setTimeout(() => targetAgent.classList.remove('active'), 2000);
+            }
         }
         
         function displayEvent(event) {
