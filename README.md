@@ -140,13 +140,18 @@ python -m agent_framework.cli.commands start customer_service.yaml tech_support.
 # Connect them
 python -m agent_framework.cli.commands connect customer_service tech_support -b
 
-# Test with beautiful interactive chat
-python -m agent_framework.cli.commands chat customer_service -v "I'm having Python errors, can you help me?"
+# Test with interactive chat - see complete agent coordination
+python -m agent_framework.cli.commands chat customer_service -v "I need help with Python imports and billing issues"
 
-# Watch the magic! See agent thinking, tool calls, and responses:
+# Complete agent-to-agent coordination display:
+# user → customer_service: I need help with Python imports and billing issues
 # [customer_service thinking...]
-# customer_service → tech_support: User is having Python errors...
-# customer_service ← tech_support: I can help with that...
+# customer_service → tech_support: User needs help with Python imports  
+# customer_service ← tech_support: Here's how to fix import issues...
+# [customer_service thinking...]
+# customer_service → billing: User also has billing concerns
+# customer_service ← billing: I can help with billing questions...
+# user ← customer_service: I've coordinated with our teams...
 ```
 
 ### 5. Run More Demos

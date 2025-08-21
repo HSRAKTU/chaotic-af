@@ -4,28 +4,18 @@
 
 ## Current Active Issues
 
-### 1. Agent-to-Agent Tool Call Responses Missing in CLI
+### 1. CLI Command Module Path Complexity
 
 #### Issue
-While agent-to-agent tool calls are visible in interactive CLI (`customer_service → tech_support`), the responses from those tool calls don't appear with the correct directional arrow.
+Users must use full module paths for CLI commands instead of a simple `agentctl` command.
 
 #### Impact
-- Users see outgoing messages but not incoming responses
-- Creates incomplete view of agent communication flow
-- Responses are present in logs but not in CLI display
+- Poor developer experience with long command names
+- `python -m agent_framework.cli.commands start` instead of `agentctl start`
+- Makes documentation examples verbose
 
-#### Evidence
-```bash
-# What users see in CLI:
-customer_service → tech_support: How to fix Python errors?
-# Missing: customer_service ← tech_support: Here's how to fix it...
-
-# But it's in logs:
-[2025-08-21 18:10:44.744] [customer_service] [INFO] Tool response: communicate_with_agent - Success
-```
-
-#### Status
-Race condition in event subscription or event emission timing. TOOL_CALL_RESPONSE events exist but aren't reaching CLI properly.
+#### Current State
+No CLI script wrapper installed via pip. Users must use full Python module syntax.
 
 ### 2. Zombie Process Management
 
@@ -58,20 +48,10 @@ Unix domain sockets are not available on Windows.
 #### Status
 Windows support is not a current priority. Community contributions welcome.
 
-### 4. CLI Command Module Path Complexity
-
-#### Issue
-Users must use full module paths for CLI commands instead of a simple `agentctl` command.
-
-#### Impact
-- Poor developer experience with long command names
-- `python -m agent_framework.cli.commands start` instead of `agentctl start`
-- Makes documentation examples verbose
-
-#### Current State
-No CLI script wrapper installed via pip. Users must use full Python module syntax.
-
 ## Previously Resolved
+
+### Agent-to-Agent Response Display (Resolved August 21, 2025)
+Interactive CLI was missing agent-to-agent tool call responses. Root cause was data structure mismatch - CLI expected dict payload but MCP client emitted CallToolResult object. Fixed by normalizing event payloads and adding defensive unwrapping.
 
 ### High CPU Usage (Resolved)
 The original 80-100% CPU usage issue from stdin polling was fixed with Unix socket implementation, achieving < 1% CPU usage.
@@ -89,7 +69,6 @@ Current performance characteristics:
 
 ## Priority for Resolution
 
-1. **High**: Agent-to-agent tool call response visibility in CLI
-2. **Medium**: Zombie process cleanup automation  
-3. **Low**: CLI command wrapper (`agentctl`)
-4. **Community**: Windows compatibility
+1. **Medium**: Zombie process cleanup automation  
+2. **Low**: CLI command wrapper (`agentctl`)
+3. **Community**: Windows compatibility
