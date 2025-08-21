@@ -11,6 +11,7 @@ import os
 import json
 from dataclasses import dataclass
 from ..core.logging import setup_logging
+from ..client.socket_client import AgentSocketClient
 
 import logging
 logger = logging.getLogger(__name__)
@@ -62,35 +63,20 @@ class ConnectionManager:
             print(f"ConnectionManager: Target agent {to_agent} not registered.", file=sys.stderr, flush=True)
             return False
         
-        # Try socket first, then fall back to stdin
-        agent_proc = agent_processes[from_agent]
+        # Use AgentSocketClient for connection
+        result = await AgentSocketClient.connect_agents(
+            from_agent, to_agent, to_endpoint
+        )
         
-        # Try socket first
-        socket_path = f"/tmp/chaotic-af/agent-{from_agent}.sock"
-        if os.path.exists(socket_path):
-            try:
-                reader, writer = await asyncio.open_unix_connection(socket_path)
-                cmd = {
-                    'cmd': 'connect',
-                    'target': to_agent,
-                    'endpoint': to_endpoint
-                }
-                writer.write(json.dumps(cmd).encode() + b'\n')
-                await writer.drain()
-                
-                response = await reader.readline()
-                writer.close()
-                await writer.wait_closed()
-                
-                result = json.loads(response.decode())
-                if result.get('status') == 'connected':
-                    self.connections[(from_agent, to_agent)] = True
-                    print(f"ConnectionManager: Connected {from_agent} -> {to_agent} via socket", file=sys.stderr, flush=True)
-                    return True
-            except Exception as e:
-                print(f"ConnectionManager: Socket connection failed: {e}", file=sys.stderr, flush=True)
-                logger.error(f"Failed to send connect command via socket: {e}")
-                return False
+        if result.get('status') == 'connected':
+            self.connections[(from_agent, to_agent)] = True
+            print(f"ConnectionManager: Connected {from_agent} -> {to_agent} via socket", file=sys.stderr, flush=True)
+            return True
+        else:
+            error = result.get('error', 'Unknown error')
+            print(f"ConnectionManager: Socket connection failed: {error}", file=sys.stderr, flush=True)
+            logger.error(f"Failed to send connect command via socket: {error}")
+            return False
     
     def get_connections(self) -> Dict[Tuple[str, str], bool]:
         """Get all established connections."""

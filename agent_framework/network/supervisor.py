@@ -25,6 +25,7 @@ from ..core.logging import AgentLogger
 from .connection_manager import ConnectionManager
 from ..core.health import HealthMonitor, HealthConfig
 from ..core.metrics import MetricsCollector, AgentMetrics
+from ..client.socket_client import AgentSocketClient
 
 
 @dataclass
@@ -232,20 +233,12 @@ class AgentSupervisor:
         
         try:
             # Try socket shutdown
-            socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
-            if os.path.exists(socket_path):
-                try:
-                    reader, writer = await asyncio.open_unix_connection(socket_path)
-                    cmd = {"cmd": "shutdown"}
-                    writer.write(json.dumps(cmd).encode() + b'\n')
-                    await writer.drain()
-                    response = await reader.readline()
-                    writer.close()
-                    await writer.wait_closed()
-                    # Give agent time to shutdown gracefully
-                    await asyncio.sleep(1.0)
-                except Exception as e:
-                    self.logger.warning(f"Socket shutdown failed: {e}")
+            result = await AgentSocketClient.shutdown_agent(agent_name, timeout=5.0)
+            if result.get('status') == 'shutting_down':
+                # Give agent time to shutdown gracefully
+                await asyncio.sleep(1.0)
+            elif result.get('error'):
+                self.logger.warning(f"Socket shutdown failed: {result['error']}")
             
             # Check if process exited gracefully
             retcode = agent_proc.process.poll()
@@ -442,29 +435,13 @@ class AgentSupervisor:
             for name, agent in agents_to_check:
                 # If not already ready, check socket responsiveness
                 if not agent.is_ready and agent.status in ["starting", "running"]:
-                    socket_path = f"/tmp/chaotic-af/agent-{name}.sock"
-                    if os.path.exists(socket_path):
-                        try:
-                            # Try socket health check
-                            reader, writer = await asyncio.wait_for(
-                                asyncio.open_unix_connection(socket_path),
-                                timeout=1.0
-                            )
-                            cmd = {"cmd": "health"}
-                            writer.write(json.dumps(cmd).encode() + b'\n')
-                            await writer.drain()
-                            response = await asyncio.wait_for(reader.readline(), timeout=1.0)
-                            writer.close()
-                            await writer.wait_closed()
-                            
-                            # Socket responded - agent is ready
-                            agent.is_ready = True
-                            if agent.status == "starting":
-                                agent.status = "running"
-                                self.logger.debug(f"Agent {name} is now running")
-                        except Exception:
-                            # Socket not ready yet
-                            pass
+                    result = await AgentSocketClient.health_check(name, timeout=1.0)
+                    if result.get('status') == 'ready':
+                        # Socket responded - agent is ready
+                        agent.is_ready = True
+                        if agent.status == "starting":
+                            agent.status = "running"
+                            self.logger.debug(f"Agent {name} is now running")
                 
                 # Also update if marked ready from stdout monitoring
                 elif agent.is_ready and agent.status == "starting":

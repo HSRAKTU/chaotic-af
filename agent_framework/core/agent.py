@@ -138,9 +138,9 @@ class Agent:
             correlation_id = str(uuid.uuid4())
             
             # Check if this is an agent communication tool
-            if tool_call.tool.startswith("contact_"):
-                # Extract agent name
-                target_agent = tool_call.tool.replace("contact_", "")
+            if tool_call.tool.startswith("communicate_with_"):
+                # Extract agent name (communicate_with_alice -> alice)
+                target_agent = tool_call.tool.replace("communicate_with_", "")
                 message = tool_call.parameters.get("message", "")
                 
                 # Use MCP client to communicate
@@ -205,7 +205,7 @@ class Agent:
             })
         
         # Get LLM response with tools
-        tools = self.mcp_server._get_agent_tools()
+        tools = await self.mcp_client.get_available_agent_tools()
         response = await self.llm.complete(messages, tools)
         
         # Log reasoning

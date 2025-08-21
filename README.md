@@ -187,11 +187,10 @@ await supervisor.start_all()
 
 ### 3. Connect Agents
 
-Each agent exposes these tools:
-- `contact_agent`: Send messages to other connected agents
-- `get_connections`: List available agent connections
-- `get_agent_status`: Check agent health
-- `chat_with_user`: Direct human interaction
+Agents discover tools from other connected agents dynamically:
+- `communicate_with_<agent_name>`: Send messages to specific connected agents
+- Tools are discovered via MCP protocol when agents connect
+- `chat_with_user`: Direct human interaction endpoint
 
 ## 🔍 Example Usage
 

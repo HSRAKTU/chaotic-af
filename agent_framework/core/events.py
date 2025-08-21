@@ -86,18 +86,36 @@ class EventStream:
             correlation_id=correlation_id
         )
         
+        # Debug logging
+        if event_type == EventType.TOOL_CALL_RESPONSE:
+            print(f"[EventStream] Emitting TOOL_CALL_RESPONSE: {data.get('tool', 'unknown')}, subscribers: {len(self.subscribers)}")
+        
         async with self._lock:
             # Store in history
             self.history.append(event)
             
             # Notify all subscribers
+            # Collect all notification tasks
+            tasks = []
             for subscriber in self.subscribers:
                 try:
-                    # Call subscriber in background to avoid blocking
-                    asyncio.create_task(self._notify_subscriber(subscriber, event))
+                    # Create task for each subscriber
+                    task = asyncio.create_task(self._notify_subscriber(subscriber, event))
+                    tasks.append(task)
                 except Exception as e:
                     # Log error but don't crash on subscriber failure
                     print(f"Error notifying subscriber: {e}")
+            
+            # Wait for all notifications to complete (with a timeout)
+            if tasks:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=1.0  # 1 second timeout for event delivery
+                    )
+                except asyncio.TimeoutError:
+                    # Log but don't fail if notifications are slow
+                    print(f"Warning: Event notifications timed out for {event_type}")
     
     async def _notify_subscriber(self, subscriber: Callable, event: AgentEvent) -> None:
         """Notify a single subscriber, handling async/sync callbacks."""

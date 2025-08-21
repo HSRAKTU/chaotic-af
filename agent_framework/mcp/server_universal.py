@@ -1,6 +1,7 @@
-"""Universal Agent MCP Server - uses a single contact_agent tool.
+"""Universal Agent MCP Server with dynamic tool discovery.
 
-This approach works with current FastMCP without needing dynamic tool registration.
+Agents discover and use tools from other connected agents' MCP servers directly,
+following proper MCP architecture principles.
 """
 
 import uuid
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 class UniversalAgentMCPServer:
-    """MCP Server with universal contact_agent tool."""
+    """MCP Server that exposes agent functionality to other agents and users."""
     
     def __init__(
         self,
@@ -54,11 +55,8 @@ Your specialized role: {self.agent_role}
 
 You are connected to these agents: {available_agents}
 
-IMPORTANT: To communicate with another agent, you MUST use the contact_agent tool (not communicate_with_agent).
-Example: contact_agent(agent_name="alice", message="Hello Alice!")
-
-The contact_agent tool is YOUR tool for reaching out to other agents.
-Do NOT use communicate_with_agent - that's for receiving messages from others.
+To communicate with other agents, use the communicate_with_<agent_name> tools that are available to you.
+For example: communicate_with_alice(message="Hello Alice!")
 
 Remember: You are part of a collaborative system. Be helpful, share information, 
 and coordinate effectively with other agents."""
@@ -80,77 +78,9 @@ and coordinate effectively with other agents."""
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
         
-        @self.server.tool
-        async def contact_agent(
-            ctx: Context,
-            agent_name: str,
-            message: str,
-            conversation_id: Optional[str] = None
-        ) -> Dict[str, Any]:
-            """Universal tool to contact any connected agent.
-            
-            Args:
-                agent_name: Name of the agent to contact
-                message: Message to send
-                conversation_id: Optional conversation ID for threading
-            """
-            correlation_id = str(uuid.uuid4())
-            
-            # Check if we're connected to this agent
-            if agent_name not in self.available_connections:
-                return {
-                    "error": f"Not connected to agent '{agent_name}'",
-                    "available_agents": self.available_connections
-                }
-            
-            # Use MCP client to communicate
-            if not self.mcp_client:
-                return {
-                    "error": "MCP client not available",
-                    "details": "Cannot execute tool calls without MCP client"
-                }
-            
-            try:
-                # Log outgoing communication
-                self.logger.log_tool_call_making(
-                    tool_name="communicate_with_agent",
-                    to_target=agent_name,
-                    payload={
-                        "from_agent": self.agent_id,
-                        "message": message,
-                        "conversation_id": conversation_id
-                    },
-                    correlation_id=correlation_id
-                )
-                
-                # Make the call
-                result = await self.mcp_client.communicate_with_agent(
-                    target_agent=agent_name,
-                    message=message,
-                    conversation_id=conversation_id
-                )
-                
-                # Log response
-                self.logger.log_tool_response(
-                    tool_name="communicate_with_agent",
-                    response=result,
-                    success=True,
-                    correlation_id=correlation_id
-                )
-                
-                return result
-                
-            except Exception as e:
-                self.logger.log_error(
-                    f"Failed to contact {agent_name}: {str(e)}",
-                    error_type="communication",
-                    correlation_id=correlation_id
-                )
-                
-                return {
-                    "error": f"Failed to contact {agent_name}",
-                    "details": str(e)
-                }
+        # NOTE: contact_agent tool has been removed
+        # Agents now use communicate_with_<agent_name> tools discovered from other agents' MCP servers
+        # This follows proper MCP architecture where agents call each other's exposed tools directly
         
         @self.server.tool
         async def get_connections(ctx: Context) -> Dict[str, Any]:
@@ -247,19 +177,29 @@ Be concise and helpful."""
             )
             
             try:
+                # Get available tools from connected agents
+                available_tools = []
+                if self.mcp_client:
+                    available_tools = await self.mcp_client.get_available_agent_tools()
+                
                 # Build user-specific system prompt
+                connected_agents = ', '.join(self.available_connections) if self.available_connections else 'None'
+                tool_descriptions = []
+                for tool in available_tools:
+                    agent_name = tool.name.replace("communicate_with_", "")
+                    tool_descriptions.append(f"- communicate_with_{agent_name}: Send a message to {agent_name}")
+                
                 user_prompt = f"""You are Agent {self.agent_id}, directly chatting with a human user.
 
 Your specialized role: {self.agent_role}
 
-You have access to these tools:
-- contact_agent(agent_name, message): Send a message to another agent
-- get_connections(): List available agents
+Connected agents: {connected_agents}
 
-Current connections: {', '.join(self.available_connections) if self.available_connections else 'None'}
+You have access to these tools:
+{chr(10).join(tool_descriptions) if tool_descriptions else '- No agents connected'}
 
 IMPORTANT RULES:
-1. Use contact_agent (NOT communicate_with_agent) to send messages
+1. Use communicate_with_<agent_name> to send messages to other agents
 2. After receiving a response from another agent, provide a final answer to the user
 3. Do NOT keep using tools repeatedly - once you get a response, summarize and respond
 4. Be helpful but concise"""
@@ -272,7 +212,7 @@ IMPORTANT RULES:
                 # Get response with tools
                 response = await self.llm.complete(
                     messages=messages,
-                    tools=self._get_agent_tools(),
+                    tools=available_tools,
                     temperature=0.7
                 )
                 
@@ -288,27 +228,28 @@ IMPORTANT RULES:
                     for tool_call in response.tool_calls:
                         self.logger.info(f"Processing tool call: {tool_call.tool} with params: {tool_call.parameters}")
                         
-                        if tool_call.tool == "contact_agent":
-                            # Execute via MCP client
-                            target_agent = tool_call.parameters.get("agent_name")
+                        if tool_call.tool.startswith("communicate_with_"):
+                            # Extract target agent from tool name
+                            target_agent = tool_call.tool.replace("communicate_with_", "")
                             message = tool_call.parameters.get("message", "")
+                            
+                            # Note: Event emission is handled by mcp_client.communicate_with_agent
                             
                             if self.mcp_client and target_agent in self.available_connections:
                                 try:
                                     result = await self.mcp_client.communicate_with_agent(
                                         target_agent=target_agent,
                                         message=message,
-                                        conversation_id=tool_call.parameters.get("conversation_id")
+                                        conversation_id=conv_id
                                     )
                                     tool_results.append(result.data if hasattr(result, 'data') else result)
+                                    # Note: Response event emission is handled by mcp_client.communicate_with_agent
                                 except Exception as e:
-                                    self.logger.error(f"Failed to contact {target_agent}: {e}")
-                                    tool_results.append({"error": f"Failed to contact {target_agent}: {str(e)}"})
+                                    self.logger.error(f"Failed to communicate with {target_agent}: {e}")
+                                    tool_results.append({"error": f"Failed to communicate with {target_agent}: {str(e)}"})
                             else:
                                 self.logger.error(f"Agent {target_agent} not in available connections: {self.available_connections}")
                                 tool_results.append({"error": f"Agent {target_agent} not available"})
-                        elif tool_call.tool == "get_connections":
-                            tool_results.append({"connections": self.available_connections})
                         else:
                             self.logger.warning(f"Unknown tool call: {tool_call.tool}")
                             tool_results.append({"error": f"Unknown tool: {tool_call.tool}"})
@@ -381,48 +322,13 @@ IMPORTANT RULES:
                 }
     
     def _get_agent_tools(self) -> List[ToolDefinition]:
-        """Get list of tools the agent's LLM can use.
+        """DEPRECATED: This method is no longer used.
         
-        With universal approach, we only need one tool for all agents.
+        Agents now discover tools from other agents' MCP servers dynamically.
+        Tools are fetched via mcp_client.get_available_agent_tools().
         """
-        tools = []
-        
-        # Single universal tool for agent communication
-        tools.append(ToolDefinition(
-            name="contact_agent",
-            description="Send a message to any connected agent",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "agent_name": {
-                        "type": "string",
-                        "description": "Name of the agent to contact"
-                    },
-                    "message": {
-                        "type": "string",
-                        "description": "The message to send"
-                    },
-                    "conversation_id": {
-                        "type": "string",
-                        "description": "Optional conversation ID"
-                    }
-                },
-                "required": ["agent_name", "message"]
-            }
-        ))
-        
-        # Tool to check available connections
-        tools.append(ToolDefinition(
-            name="get_connections",
-            description="Get list of agents you can contact",
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        ))
-        
-        return tools
+        # This method is kept for backward compatibility but should not be used
+        return []
     
     async def run(self, port: int):
         """Run the MCP server."""

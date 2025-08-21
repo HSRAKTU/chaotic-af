@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+from ..core.logging import AgentLogger
 
 
 class AgentControlSocket:
@@ -12,6 +13,12 @@ class AgentControlSocket:
         self.agent = agent
         self.socket_path = socket_path
         self.shutdown_event = shutdown_event
+        self._event_subscription = None
+        # Use the agent's logger if available, otherwise create a basic one
+        self.logger = agent.logger if hasattr(agent, 'logger') else AgentLogger(
+            agent_id=agent.agent_id if hasattr(agent, 'agent_id') else 'control_socket',
+            log_level='INFO'
+        )
     
     async def start(self):
         """Start the control socket server."""
@@ -83,6 +90,59 @@ class AgentControlSocket:
                 else:
                     response = {'error': 'Metrics not available'}
             
+            elif cmd['cmd'] == 'subscribe_events':
+                # Subscribe to agent events and stream them
+                response = {'status': 'subscribed'}
+                
+                # Send initial response
+                writer.write(json.dumps(response).encode() + b'\n')
+                await writer.drain()
+                
+                # Set up event forwarding
+                if hasattr(self.agent, 'event_stream'):
+                    async def forward_event(event):
+                        # Forward event to client
+                        try:
+                            event_data = {
+                                'event': {
+                                    'type': event.event_type,
+                                    'agent_id': event.agent_id,
+                                    'data': event.data,
+                                    'timestamp': event.timestamp.isoformat()
+                                }
+                            }
+                            writer.write(json.dumps(event_data).encode() + b'\n')
+                            await writer.drain()
+                        except Exception as e:
+                            # Connection closed, unsubscribe
+                            self.logger.debug(f"Event forwarding error: {e}")
+                            if hasattr(self.agent, 'event_stream'):
+                                self.agent.event_stream.unsubscribe(forward_event)
+                    
+                    # Subscribe to agent's event stream
+                    self.agent.event_stream.subscribe(forward_event)
+                    self._event_subscription = forward_event
+                    self.logger.info(f"Subscribed to event stream for {self.agent.agent_id}, subscribers: {len(self.agent.event_stream.subscribers)}")
+                    
+                    # Keep connection open for streaming events
+                    try:
+                        # Wait indefinitely while connection is open
+                        while True:
+                            # Check if connection is still alive
+                            await asyncio.sleep(1)
+                            # The events are sent via forward_event callback
+                    except (ConnectionResetError, BrokenPipeError):
+                        # Client disconnected
+                        pass
+                    finally:
+                        # Unsubscribe when connection closes
+                        if hasattr(self.agent, 'event_stream'):
+                            self.agent.event_stream.unsubscribe(forward_event)
+                    
+                    return  # Skip normal response/cleanup
+                else:
+                    response = {'error': 'Event stream not available'}
+            
             else:
                 response = {'error': f"Unknown command: {cmd['cmd']}"}
             
@@ -97,6 +157,14 @@ class AgentControlSocket:
             await writer.drain()
         
         finally:
+            # Unsubscribe from events if subscribed
+            if hasattr(self, '_event_subscription') and self._event_subscription and hasattr(self.agent, 'event_stream'):
+                try:
+                    self.agent.event_stream.unsubscribe(self._event_subscription)
+                except:
+                    pass
+                self._event_subscription = None
+                
             writer.close()
             await writer.wait_closed()
     

@@ -24,6 +24,7 @@ import time
 from ..core.config import load_config, AgentConfig
 from ..network.supervisor import AgentSupervisor
 from ..network.registry import AgentRegistry
+from ..client.socket_client import AgentSocketClient
 
 
 # Global state file to track running agents
@@ -209,23 +210,20 @@ def status(ctx):
             socket_path = f"/tmp/chaotic-af/agent-{name}.sock"
             if os.path.exists(socket_path):
                 try:
-                    # Try to connect to socket
-                    reader, writer = await asyncio.wait_for(
-                        asyncio.open_unix_connection(socket_path),
-                        timeout=1.0
-                    )
-                    # Send health check
-                    cmd = {"cmd": "health"}
-                    writer.write(json.dumps(cmd).encode() + b'\n')
-                    await writer.drain()
-                    response = await asyncio.wait_for(reader.readline(), timeout=1.0)
-                    writer.close()
-                    await writer.wait_closed()
+                    # Use AgentSocketClient for health check
+                    result = await AgentSocketClient.health_check(name, timeout=1.0)
                     
-                    # Socket responded - agent is running
-                    status = 'running'
-                    status_display = click.style('running ✓', fg='green')
-                    info_text = ""
+                    if result.get('status') == 'ready':
+                        # Socket responded - agent is running
+                        status = 'running'
+                        status_display = click.style('running ✓', fg='green')
+                        info_text = ""
+                    else:
+                        # Got response but not ready
+                        status = 'starting'
+                        elapsed = int(time.time() - info.get('started_at', time.time()))
+                        status_display = click.style('starting', fg='yellow')
+                        info_text = f"({elapsed}s ago)"
                 except Exception as e:
                     # Socket exists but not responding - still starting
                     status = 'starting'
@@ -381,74 +379,30 @@ def connect(ctx, from_agent: str, to_agent: str, bidirectional: bool):
     async def do_connect():
         """Execute the connection via socket."""
         # Connect from_agent -> to_agent
-        socket_path = f"/tmp/chaotic-af/agent-{from_agent}.sock"
+        result = await AgentSocketClient.connect_agents(
+            from_agent, to_agent,
+            f'http://localhost:{to_info["port"]}/mcp'
+        )
         
-        try:
-            # Check if socket exists
-            if not os.path.exists(socket_path):
-                click.echo(f"✗ Agent '{from_agent}' socket not found. Is it running with socket mode?", err=True)
-                return False
-                
-            # Connect to socket
-            reader, writer = await asyncio.open_unix_connection(socket_path)
+        if result.get('status') == 'connected':
+            click.echo(f"✓ Connected: {from_agent} → {to_agent}")
+        else:
+            click.echo(f"✗ Failed to connect: {result.get('error', 'Unknown error')}", err=True)
+            return False
             
-            # Send connect command
-            cmd = {
-                'cmd': 'connect',
-                'target': to_agent,
-                'endpoint': f'http://localhost:{to_info["port"]}/mcp'
-            }
-            writer.write(json.dumps(cmd).encode() + b'\n')
-            await writer.drain()
-            
-            # Read response
-            response = await reader.readline()
-            result = json.loads(response.decode())
-            
-            writer.close()
-            await writer.wait_closed()
+        # Bidirectional connection
+        if bidirectional:
+            result = await AgentSocketClient.connect_agents(
+                to_agent, from_agent,
+                f'http://localhost:{from_info["port"]}/mcp'
+            )
             
             if result.get('status') == 'connected':
-                click.echo(f"✓ Connected: {from_agent} → {to_agent}")
+                click.echo(f"✓ Connected: {to_agent} → {from_agent}")
             else:
-                click.echo(f"✗ Failed to connect: {result.get('error', 'Unknown error')}", err=True)
-                return False
+                click.echo(f"✗ Failed reverse connection: {result.get('error', 'Unknown error')}", err=True)
                 
-            # Bidirectional connection
-            if bidirectional:
-                # Connect to_agent -> from_agent
-                socket_path = f"/tmp/chaotic-af/agent-{to_agent}.sock"
-                
-                if not os.path.exists(socket_path):
-                    click.echo(f"✗ Agent '{to_agent}' socket not found", err=True)
-                    return False
-                    
-                reader, writer = await asyncio.open_unix_connection(socket_path)
-                
-                cmd = {
-                    'cmd': 'connect',
-                    'target': from_agent,
-                    'endpoint': f'http://localhost:{from_info["port"]}/mcp'
-                }
-                writer.write(json.dumps(cmd).encode() + b'\n')
-                await writer.drain()
-                
-                response = await reader.readline()
-                result = json.loads(response.decode())
-                
-                writer.close()
-                await writer.wait_closed()
-                
-                if result.get('status') == 'connected':
-                    click.echo(f"✓ Connected: {to_agent} → {from_agent}")
-                else:
-                    click.echo(f"✗ Failed reverse connection: {result.get('error', 'Unknown error')}", err=True)
-                    
-            return True
-            
-        except Exception as e:
-            click.echo(f"✗ Failed to connect agents: {str(e)}", err=True)
-            return False
+        return True
     
     # Run the async connection
     asyncio.run(do_connect())
@@ -470,36 +424,19 @@ def health(ctx, agent_name: str):
         return
     
     async def check_health():
-        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+        result = await AgentSocketClient.health_check(agent_name, timeout=5.0)
         
-        try:
-            if not os.path.exists(socket_path):
+        if result.get('error'):
+            if 'Timeout' in result['error']:
+                click.echo(f"✗ Agent '{agent_name}' health check timed out", err=True)
+            elif 'Socket not found' in result['error']:
                 click.echo(f"✗ Agent '{agent_name}' socket not found", err=True)
-                return
-            
-            reader, writer = await asyncio.open_unix_connection(socket_path)
-            
-            # Send health command
-            cmd = {"cmd": "health"}
-            writer.write(json.dumps(cmd).encode() + b'\n')
-            await writer.drain()
-            
-            # Read response with timeout
-            response = await asyncio.wait_for(reader.readline(), timeout=5.0)
-            result = json.loads(response.decode())
-            
-            writer.close()
-            await writer.wait_closed()
-            
-            if result.get('status') == 'ready':
-                click.echo(f"✓ Agent '{agent_name}' is healthy")
             else:
-                click.echo(f"✗ Agent '{agent_name}' is not healthy", err=True)
-                
-        except asyncio.TimeoutError:
-            click.echo(f"✗ Agent '{agent_name}' health check timed out", err=True)
-        except Exception as e:
-            click.echo(f"✗ Health check failed: {str(e)}", err=True)
+                click.echo(f"✗ Health check failed: {result['error']}", err=True)
+        elif result.get('status') == 'ready':
+            click.echo(f"✓ Agent '{agent_name}' is healthy")
+        else:
+            click.echo(f"✗ Agent '{agent_name}' is not healthy", err=True)
     
     asyncio.run(check_health())
 
@@ -522,40 +459,22 @@ def metrics(ctx, agent_name: str, format: str):
         return
     
     async def get_metrics():
-        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
+        result = await AgentSocketClient.get_metrics(agent_name, format)
         
-        try:
-            if not os.path.exists(socket_path):
+        if result.get('error'):
+            if 'Socket not found' in result['error']:
                 click.echo(f"✗ Agent '{agent_name}' socket not found", err=True)
-                return
-            
-            reader, writer = await asyncio.open_unix_connection(socket_path)
-            
-            # Send metrics command
-            cmd = {"cmd": "metrics", "format": format}
-            writer.write(json.dumps(cmd).encode() + b'\n')
-            await writer.drain()
-            
-            # Read response
-            response = await reader.readline()
-            result = json.loads(response.decode())
-            
-            writer.close()
-            await writer.wait_closed()
-            
-            if 'metrics' in result:
-                if format == 'json':
-                    # Pretty print JSON
-                    import json
-                    click.echo(json.dumps(result['metrics'], indent=2))
-                else:
-                    # Prometheus format
-                    click.echo(result['metrics'])
             else:
-                click.echo(f"✗ {result.get('error', 'Failed to get metrics')}", err=True)
-                
-        except Exception as e:
-            click.echo(f"✗ Failed to get metrics: {str(e)}", err=True)
+                click.echo(f"✗ Failed to get metrics: {result['error']}", err=True)
+        elif 'metrics' in result:
+            if format == 'json':
+                # Pretty print JSON
+                click.echo(json.dumps(result['metrics'], indent=2))
+            else:
+                # Prometheus format
+                click.echo(result['metrics'])
+        else:
+            click.echo(f"✗ Failed to get metrics", err=True)
     
     asyncio.run(get_metrics())
 
@@ -698,27 +617,8 @@ def watch(ctx, interval: int):
     
     async def check_agent_health(agent_name: str) -> bool:
         """Quick health check for an agent."""
-        socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
-        
-        try:
-            if not os.path.exists(socket_path):
-                return False
-                
-            reader, writer = await asyncio.open_unix_connection(socket_path)
-            cmd = {"cmd": "health"}
-            writer.write(json.dumps(cmd).encode() + b'\n')
-            await writer.drain()
-            
-            response = await asyncio.wait_for(reader.readline(), timeout=1.0)
-            result = json.loads(response.decode())
-            
-            writer.close()
-            await writer.wait_closed()
-            
-            return result.get('status') == 'ready'
-            
-        except:
-            return False
+        result = await AgentSocketClient.health_check(agent_name, timeout=1.0)
+        return result.get('status') == 'ready'
     
     asyncio.run(watch_agents())
 
@@ -784,6 +684,169 @@ def remove(ctx, agent_names: tuple, stopped: bool, failed: bool, all: bool):
             click.echo(f"  • {name}")
     else:
         click.echo("No agents removed.")
+
+
+@cli.command()
+@click.argument('agent_name')
+@click.argument('message', required=False)
+@click.option('-i', '--interactive', is_flag=True, help='Interactive chat mode')
+@click.option('-v', '--verbose', is_flag=True, help='Show agent thinking and tool usage')
+def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
+    """Send a message to an agent via MCP protocol."""
+    async def send_chat():
+        # Get agent info from state
+        state = load_state()
+        
+        if agent_name not in state['agents']:
+            click.echo(f"✗ Agent '{agent_name}' not found", err=True)
+            return
+            
+        agent_info = state['agents'][agent_name]
+        
+        if agent_info['status'] != 'running':
+            click.echo(f"✗ Agent '{agent_name}' is not running", err=True)
+            return
+        
+        try:
+            # Interactive mode
+            if interactive and not message:
+                click.echo(f"Interactive chat with {agent_name}. Type 'exit' to quit.\n")
+                
+            # Create MCP client with event handling for verbose mode
+            from ..mcp.client import AgentMCPClient
+            from ..core.events import EventStream
+            from ..core.logging import AgentLogger
+            import uuid
+            
+            event_stream = EventStream(agent_id="cli-user")
+            
+            # Subscribe to agent's events if verbose
+            event_task = None
+            if verbose:
+                async def handle_agent_event(event):
+                    event_type = event.get('type', '')
+                    agent_id = event.get('agent_id', '')
+                    data = event.get('data', {})
+                    
+                    # Debug ALL events - show everything for debugging
+                    click.echo(f"[RAW_EVENT] Type: {event_type}, Agent: {agent_id}, Data: {data}", err=True)
+                    
+                    if event_type in ['tool_call_making', 'TOOL_CALL_MAKING']:
+                        click.echo(click.style(f"[{agent_id} thinking...]", fg='yellow'))
+                        tool_name = data.get('tool', '')
+                        # Support both old and new tool naming patterns
+                        if tool_name == 'communicate_with_agent' or tool_name.startswith('communicate_with_'):
+                            target = data.get('target', '')
+                            payload = data.get('payload', {})
+                            msg = payload.get('message', '')[:80] + '...' if len(payload.get('message', '')) > 80 else payload.get('message', '')
+                            styled_agent = click.style(agent_id, fg='cyan', bold=True)
+                            styled_target = click.style(target, fg='magenta', bold=True)
+                            click.echo(f"{styled_agent} → {styled_target}: {msg}")
+                    
+                    elif event_type in ['tool_call_response', 'TOOL_CALL_RESPONSE']:
+                        tool_name = data.get('tool', '')
+                        # Support both old and new tool naming patterns
+                        if tool_name == 'communicate_with_agent' or tool_name.startswith('communicate_with_'):
+                            # This is a response from another agent
+                            response = data.get('response', {})
+                            target = data.get('target', '')
+                            if isinstance(response, dict):
+                                # Extract the responding agent from the response
+                                from_agent = response.get('agent', target)
+                                msg = response.get('response', '')[:80] + '...' if len(response.get('response', '')) > 80 else response.get('response', '')
+                                styled_to = click.style(agent_id, fg='cyan', bold=True)
+                                styled_from = click.style(from_agent, fg='magenta', bold=True)
+                                # Use ← to show it's a response coming back
+                                click.echo(f"{styled_to} ← {styled_from}: {msg}")
+                
+                # Subscribe to agent's event stream
+                try:
+                    click.echo(f"[DEBUG] Attempting to subscribe to {agent_name} events...", err=True)
+                    event_task = await AgentSocketClient.subscribe_events(agent_name, handle_agent_event)
+                    click.echo(f"[DEBUG] Successfully subscribed to {agent_name} events", err=True)
+                except Exception as e:
+                    click.echo(f"[ERROR] Could not subscribe to events: {e}", err=True)
+                    event_task = None
+            
+            client = AgentMCPClient(
+                agent_id="cli-user",
+                event_stream=event_stream,
+                logger=AgentLogger("cli-user", "ERROR")
+            )
+            
+            # Connect to agent
+            endpoint = f"http://localhost:{agent_info['port']}/mcp"
+            await client.add_connection(agent_name, endpoint)
+            
+            # Session for context management
+            session_id = str(uuid.uuid4())
+            
+            async def send_message(msg):
+                if verbose:
+                    styled_user = click.style("user", fg='green', bold=True)
+                    styled_agent = click.style(agent_name, fg='cyan', bold=True)
+                    click.echo(f"\n{styled_user} → {styled_agent}: {msg}")
+                    
+                response = await client.call_tool(
+                    server_name=agent_name,
+                    tool_name="chat_with_user",
+                    arguments={"message": msg, "conversation_id": session_id}
+                )
+                
+                agent_response = response.data['response']
+                
+                if verbose:
+                    styled_agent = click.style(agent_name, fg='cyan', bold=True)
+                    styled_user = click.style("user", fg='green', bold=True)
+                    click.echo(f"{styled_agent} → {styled_user}: {agent_response}\n")
+                else:
+                    styled_agent = click.style(agent_name, fg='cyan', bold=True)
+                    click.echo(f"\n{styled_agent}: {agent_response}\n")
+                    
+                return agent_response
+            
+            # Send initial message or enter interactive loop
+            if message:
+                await send_message(message)
+                
+                if interactive:
+                    # Continue in interactive mode
+                    while True:
+                        try:
+                            user_input = click.prompt("> ", prompt_suffix="")
+                            if user_input.lower() in ['exit', 'quit']:
+                                break
+                            await send_message(user_input)
+                        except (EOFError, KeyboardInterrupt):
+                            click.echo("\n\nExiting chat...")
+                            break
+            elif interactive:
+                # Pure interactive mode
+                while True:
+                    try:
+                        user_input = click.prompt("> ", prompt_suffix="")
+                        if user_input.lower() in ['exit', 'quit']:
+                            break
+                        await send_message(user_input)
+                    except (EOFError, KeyboardInterrupt):
+                        click.echo("\n\nExiting chat...")
+                        break
+            
+            # Cleanup
+            await client.close_all()
+            
+            # Cancel event subscription if active
+            if event_task and not event_task.done():
+                event_task.cancel()
+                try:
+                    await event_task
+                except asyncio.CancelledError:
+                    pass
+            
+        except Exception as e:
+            click.echo(f"✗ Failed to chat with agent: {e}", err=True)
+    
+    asyncio.run(send_chat())
 
 
 @cli.command()

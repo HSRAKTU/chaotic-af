@@ -65,7 +65,7 @@ def test_connect_socket_not_found(runner, mock_state):
             with patch('os.path.exists', return_value=False):
                 result = runner.invoke(cli, ['connect', 'alice', 'bob'])
                 assert result.exit_code == 0
-                assert "socket not found" in result.output
+                assert "Socket not found" in result.output
 
 
 def test_connect_success(runner):

@@ -15,6 +15,7 @@ import uuid
 from fastmcp import Client
 from ..core.events import EventStream, EventType
 from ..core.logging import AgentLogger
+from ..core.llm import ToolDefinition
 
 
 class MCPConnection:
@@ -126,6 +127,35 @@ class AgentMCPClient:
             
             return False
     
+    async def get_available_agent_tools(self) -> List['ToolDefinition']:
+        """Get all tools available from connected agents.
+        
+        Returns tools formatted for the LLM to use, with agent-specific naming.
+        For example, if connected to 'bob', returns 'communicate_with_bob' tool.
+        """
+        tools = []
+        for name, conn in self.connections.items():
+            if not conn.connected or not conn.is_agent:
+                continue
+                
+            # Create a tool for communicating with this specific agent
+            tools.append(ToolDefinition(
+                name=f"communicate_with_{name}",
+                description=f"Send a message to {name} agent and get their response",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "message": {
+                            "type": "string",
+                            "description": f"The message to send to {name}"
+                        }
+                    },
+                    "required": ["message"]
+                }
+            ))
+        
+        return tools
+    
     async def communicate_with_agent(
         self, 
         target_agent: str, 
@@ -166,11 +196,11 @@ class AgentMCPClient:
             correlation_id=correlation_id
         )
         
-        # Emit event
+        # Emit event with new tool naming
         await self.event_stream.emit(
             EventType.TOOL_CALL_MAKING,
             {
-                "tool": "communicate_with_agent",
+                "tool": f"communicate_with_{target_agent}",
                 "target": target_agent,
                 "payload": {
                     "from_agent": self.agent_id,
@@ -199,16 +229,18 @@ class AgentMCPClient:
                 correlation_id=correlation_id
             )
             
-            # Emit response event
+            # Emit response event with new tool naming
+            print(f"[MCP Client] About to emit TOOL_CALL_RESPONSE for communicate_with_{target_agent}")
             await self.event_stream.emit(
                 EventType.TOOL_CALL_RESPONSE,
                 {
-                    "tool": "communicate_with_agent",
+                    "tool": f"communicate_with_{target_agent}",
                     "target": target_agent,
                     "response": result
                 },
                 correlation_id
             )
+            print(f"[MCP Client] Emitted TOOL_CALL_RESPONSE for communicate_with_{target_agent}")
             
             return result
             

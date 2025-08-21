@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from ..core.logging import AgentLogger
+from ..client.socket_client import AgentSocketClient
 
 
 @dataclass
@@ -115,8 +116,7 @@ class HealthMonitor:
                 return
                 
             # Check via socket
-            socket_path = f"/tmp/chaotic-af/agent-{agent_name}.sock"
-            healthy = await self._check_socket_health(socket_path)
+            healthy = await self._check_socket_health(agent_name)
             
             if healthy:
                 self._handle_health_success(health_status)
@@ -131,39 +131,10 @@ class HealthMonitor:
             self.logger.error(f"Error checking health of {agent_name}: {e}")
             self._handle_health_failure(health_status, str(e))
             
-    async def _check_socket_health(self, socket_path: str) -> bool:
+    async def _check_socket_health(self, agent_name: str) -> bool:
         """Check agent health via socket."""
-        try:
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_unix_connection(socket_path),
-                timeout=self.config.socket_timeout
-            )
-            
-            # Send health command
-            cmd = {"cmd": "health"}
-            writer.write(json.dumps(cmd).encode() + b'\n')
-            await writer.drain()
-            
-            # Read response
-            response = await asyncio.wait_for(
-                reader.readline(),
-                timeout=self.config.socket_timeout
-            )
-            
-            writer.close()
-            await writer.wait_closed()
-            
-            if response:
-                result = json.loads(response.decode())
-                return result.get("status") == "ready"
-                
-            return False
-            
-        except (asyncio.TimeoutError, ConnectionRefusedError, FileNotFoundError):
-            return False
-        except Exception as e:
-            self.logger.debug(f"Socket health check error: {e}")
-            return False
+        result = await AgentSocketClient.health_check(agent_name, timeout=self.config.socket_timeout)
+        return result.get("status") == "ready"
             
     def _handle_health_success(self, health_status: HealthStatus):
         """Handle successful health check."""
