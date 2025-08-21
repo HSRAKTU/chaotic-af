@@ -86,9 +86,7 @@ class EventStream:
             correlation_id=correlation_id
         )
         
-        # Debug logging
-        if event_type == EventType.TOOL_CALL_RESPONSE:
-            print(f"[EventStream] Emitting TOOL_CALL_RESPONSE: {data.get('tool', 'unknown')}, subscribers: {len(self.subscribers)}")
+        # Event emission to all subscribers
         
         async with self._lock:
             # Store in history
@@ -129,7 +127,8 @@ class EventStream:
         self.subscribers.append(callback)
         
         def unsubscribe():
-            self.subscribers.remove(callback)
+            if callback in self.subscribers:
+                self.subscribers.remove(callback)
         
         return unsubscribe
     

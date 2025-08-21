@@ -229,18 +229,24 @@ class AgentMCPClient:
                 correlation_id=correlation_id
             )
             
-            # Emit response event with new tool naming
-            print(f"[MCP Client] About to emit TOOL_CALL_RESPONSE for communicate_with_{target_agent}")
+            # Normalize result to dict for event emission (Fix for CLI display)
+            response_payload = result
+            if hasattr(result, 'data') and isinstance(result.data, dict):
+                response_payload = result.data
+            elif not isinstance(response_payload, dict):
+                # Last-resort normalization
+                response_payload = {"agent": target_agent, "response": str(response_payload)}
+            
+            # Emit response event with normalized payload
             await self.event_stream.emit(
                 EventType.TOOL_CALL_RESPONSE,
                 {
                     "tool": f"communicate_with_{target_agent}",
                     "target": target_agent,
-                    "response": result
+                    "response": response_payload  # Now guaranteed to be a dict
                 },
                 correlation_id
             )
-            print(f"[MCP Client] Emitted TOOL_CALL_RESPONSE for communicate_with_{target_agent}")
             
             return result
             

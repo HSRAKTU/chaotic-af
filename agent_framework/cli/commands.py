@@ -720,7 +720,7 @@ def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
             
             event_stream = EventStream(agent_id="cli-user")
             
-            # Subscribe to agent's events if verbose
+            # Subscribe to agent's events FIRST if verbose (before any tool calls)
             event_task = None
             if verbose:
                 async def handle_agent_event(event):
@@ -728,8 +728,9 @@ def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
                     agent_id = event.get('agent_id', '')
                     data = event.get('data', {})
                     
-                    # Debug ALL events - show everything for debugging
-                    click.echo(f"[RAW_EVENT] Type: {event_type}, Agent: {agent_id}, Data: {data}", err=True)
+                    # Debug events in verbose mode only
+                    if event_type:  # Only show meaningful events
+                        pass  # Raw debug removed - showing processed events below
                     
                     if event_type in ['tool_call_making', 'TOOL_CALL_MAKING']:
                         click.echo(click.style(f"[{agent_id} thinking...]", fg='yellow'))
@@ -750,22 +751,28 @@ def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
                             # This is a response from another agent
                             response = data.get('response', {})
                             target = data.get('target', '')
-                            if isinstance(response, dict):
-                                # Extract the responding agent from the response
-                                from_agent = response.get('agent', target)
-                                msg = response.get('response', '')[:80] + '...' if len(response.get('response', '')) > 80 else response.get('response', '')
-                                styled_to = click.style(agent_id, fg='cyan', bold=True)
-                                styled_from = click.style(from_agent, fg='magenta', bold=True)
-                                # Use ← to show it's a response coming back
-                                click.echo(f"{styled_to} ← {styled_from}: {msg}")
+                            
+                            # DEFENSIVE: Unwrap common response shapes (Fix B from GPT-5)
+                            if not isinstance(response, dict) and hasattr(response, 'data'):
+                                response = response.data
+                            if not isinstance(response, dict):
+                                response = {"agent": target, "response": str(response)}
+                            
+                            # Extract the responding agent from the response
+                            from_agent = response.get('agent', target)
+                            msg = response.get('response', '')[:80] + '...' if len(response.get('response', '')) > 80 else response.get('response', '')
+                            styled_to = click.style(agent_id, fg='cyan', bold=True)
+                            styled_from = click.style(from_agent, fg='magenta', bold=True)
+                            # Use ← to show it's a response coming back
+                            click.echo(f"{styled_to} ← {styled_from}: {msg}")
                 
-                # Subscribe to agent's event stream
+                # Subscribe to agent's event stream IMMEDIATELY
                 try:
-                    click.echo(f"[DEBUG] Attempting to subscribe to {agent_name} events...", err=True)
                     event_task = await AgentSocketClient.subscribe_events(agent_name, handle_agent_event)
-                    click.echo(f"[DEBUG] Successfully subscribed to {agent_name} events", err=True)
+                    # Give subscription time to be registered
+                    await asyncio.sleep(0.2)
                 except Exception as e:
-                    click.echo(f"[ERROR] Could not subscribe to events: {e}", err=True)
+                    click.echo(f"✗ Could not subscribe to agent events: {e}", err=True)
                     event_task = None
             
             client = AgentMCPClient(
@@ -798,7 +805,8 @@ def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
                 if verbose:
                     styled_agent = click.style(agent_name, fg='cyan', bold=True)
                     styled_user = click.style("user", fg='green', bold=True)
-                    click.echo(f"{styled_agent} → {styled_user}: {agent_response}\n")
+                    # Use ← to show response coming TO user FROM agent
+                    click.echo(f"{styled_user} ← {styled_agent}: {agent_response}\n")
                 else:
                     styled_agent = click.style(agent_name, fg='cyan', bold=True)
                     click.echo(f"\n{styled_agent}: {agent_response}\n")
@@ -831,6 +839,12 @@ def chat(agent_name: str, message: str, interactive: bool, verbose: bool):
                     except (EOFError, KeyboardInterrupt):
                         click.echo("\n\nExiting chat...")
                         break
+            
+            # Give events time to be processed before cleanup
+            if verbose and event_task and not event_task.done():
+                # Wait longer for any pending TOOL_CALL_RESPONSE events to be processed
+                # This fixes the race condition where events are emitted but CLI cleanup happens too fast
+                await asyncio.sleep(2.0)
             
             # Cleanup
             await client.close_all()

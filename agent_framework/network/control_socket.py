@@ -120,8 +120,8 @@ class AgentControlSocket:
                                 self.agent.event_stream.unsubscribe(forward_event)
                     
                     # Subscribe to agent's event stream
-                    self.agent.event_stream.subscribe(forward_event)
-                    self._event_subscription = forward_event
+                    unsubscribe_func = self.agent.event_stream.subscribe(forward_event)
+                    self._event_subscription = unsubscribe_func
                     self.logger.info(f"Subscribed to event stream for {self.agent.agent_id}, subscribers: {len(self.agent.event_stream.subscribers)}")
                     
                     # Keep connection open for streaming events
