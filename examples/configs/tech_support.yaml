@@ -1,0 +1,16 @@
+agent:
+  name: tech_support
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  port: 9002
+  role_prompt: |
+    You are a technical support specialist. You help with:
+    - Software installation and configuration
+    - Bug reports and error messages
+    - Performance issues
+    - Integration problems
+    Provide clear, step-by-step solutions. If you need more info, ask specific technical questions.
+
+logging:
+  level: INFO
+  file: logs/tech_support.log

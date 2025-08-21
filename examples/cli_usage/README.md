@@ -1,6 +1,6 @@
 # CLI Usage Example
 
-This example demonstrates using `agentctl` to manage agents via the command line.
+This example demonstrates using the CLI to manage agents via the command line.
 
 ## Files
 
@@ -25,30 +25,45 @@ This example demonstrates using `agentctl` to manage agents via the command line
 
 Start agents:
 ```bash
-agentctl start alice.yaml bob.yaml charlie.yaml
+python -m agent_framework.cli.commands start alice.yaml bob.yaml charlie.yaml
 ```
 
 Check status:
 ```bash
-agentctl status
+python -m agent_framework.cli.commands status
 ```
 
 Connect agents:
 ```bash
 # One-way connection
-agentctl connect alice bob
+python -m agent_framework.cli.commands connect alice bob
 
 # Bidirectional connection
-agentctl connect alice bob -b
+python -m agent_framework.cli.commands connect alice bob -b
+```
+
+Interactive chat:
+```bash
+# Single message
+python -m agent_framework.cli.commands chat alice "What's the weather like?"
+
+# Verbose mode - see agent thinking and tool calls
+python -m agent_framework.cli.commands chat alice -v "Ask bob about geography"
+
+# Interactive mode
+python -m agent_framework.cli.commands chat alice -i
+
+# Interactive + verbose (best experience)
+python -m agent_framework.cli.commands chat alice -i -v
 ```
 
 Stop agents:
 ```bash
 # Stop specific agent
-agentctl stop alice
+python -m agent_framework.cli.commands stop alice
 
 # Stop all agents
-agentctl stop --all
+python -m agent_framework.cli.commands stop --all
 ```
 
 ## Key Features Demonstrated

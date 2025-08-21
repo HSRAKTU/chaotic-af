@@ -1,61 +1,50 @@
 # Known Issues
 
-> **Last Updated**: August 19, 2025
-
-## Windows Compatibility
-
-### Issue
-Unix domain sockets are not available on Windows.
-
-### Impact
-Socket mode doesn't work on Windows; must use stdin mode which has higher CPU usage.
-
-### Workaround
-Use `--use-stdin` flag explicitly on Windows:
-```bash
-python -m agent_framework.network.agent_runner --use-stdin --config "..."
-```
-
-### Note
-Windows support is not a current priority. Community contributions welcome.
+> **Last Updated**: August 21, 2025
 
 ## Current Active Issues
 
-### 1. Socket API Code Duplication
+### 1. Agent-to-Agent Tool Call Responses Missing in CLI
 
 #### Issue
-Same socket communication code duplicated across multiple modules.
+While agent-to-agent tool calls are visible in interactive CLI (`customer_service → tech_support`), the responses from those tool calls don't appear with the correct directional arrow.
 
 #### Impact
-- Violates DRY principle
-- Maintenance burden
-- Potential for inconsistent behavior
+- Users see outgoing messages but not incoming responses
+- Creates incomplete view of agent communication flow
+- Responses are present in logs but not in CLI display
 
-#### Locations
-- CLI `connect` command (cli/commands.py:381-454)
-- CLI `status` command (cli/commands.py:200-230)
-- ConnectionManager (network/connection_manager.py:69-93)
-- Supervisor._wait_for_all_ready (network/supervisor.py:448-456)
+#### Evidence
+```bash
+# What users see in CLI:
+customer_service → tech_support: How to fix Python errors?
+# Missing: customer_service ← tech_support: Here's how to fix it...
 
-#### Proposed Solution
-Create unified `AgentSocketClient` class in framework layer that both CLI and library can use.
+# But it's in logs:
+[2025-08-21 18:10:44.744] [customer_service] [INFO] Tool response: communicate_with_agent - Success
+```
 
-### 2. Chat Command Implementation
+#### Status
+Race condition in event subscription or event emission timing. TOOL_CALL_RESPONSE events exist but aren't reaching CLI properly.
+
+### 2. Zombie Process Management
 
 #### Issue
-Chat command partially implemented but not working correctly with MCP tool access.
+When agents crash or are killed unexpectedly, zombie processes can accumulate and interfere with new agent startups.
 
 #### Impact
-- Users cannot interact with agents via CLI chat
-- MCP tool integration from control socket is complex
+- `ps aux | grep agent_framework` shows multiple stale processes
+- Can cause port conflicts when restarting agents
+- May prevent clean shutdown of supervisor processes
 
-#### Current State
-- Basic chat handler exists in control_socket.py
-- Needs proper integration with MCP infrastructure
-- Tool access (contact_agent) not working from chat context
+#### Workaround
+Manually kill processes:
+```bash
+ps aux | grep -E "agent_framework.network.agent_runner" | grep -v grep | awk '{print $2}' | xargs kill -9
+```
 
-#### Decision
-Postponed to maintain code clarity and avoid fragile workarounds.
+#### Root Cause
+Process cleanup not always triggered properly during abnormal shutdown scenarios.
 
 ### 3. Windows Compatibility
 
@@ -63,69 +52,44 @@ Postponed to maintain code clarity and avoid fragile workarounds.
 Unix domain sockets are not available on Windows.
 
 #### Impact
-- Framework doesn't work on Windows at all (stdin mode removed)
-- Windows users cannot use the framework
+- Framework doesn't work on Windows at all
+- No alternative IPC mechanism implemented
 
-#### Current State
-- Unix sockets are the only IPC mechanism
-- No Windows alternative implemented
-
-#### Note
+#### Status
 Windows support is not a current priority. Community contributions welcome.
 
-## Fixed Issues ✅
+### 4. CLI Command Module Path Complexity
 
-The following issues have been resolved:
+#### Issue
+Users must use full module paths for CLI commands instead of a simple `agentctl` command.
 
-### 1. **High CPU Usage** 
-- **Fixed**: Reduced from 80-100% to < 1% with Unix socket implementation
-- **Solution**: Event-driven architecture with epoll/kqueue
+#### Impact
+- Poor developer experience with long command names
+- `python -m agent_framework.cli.commands start` instead of `agentctl start`
+- Makes documentation examples verbose
 
-### 2. **CLI Connect Command**
-- **Fixed**: Now works properly via Unix sockets
-- **Solution**: Proper socket-based IPC between CLI and agents
+#### Current State
+No CLI script wrapper installed via pip. Users must use full Python module syntax.
 
-### 3. **Process Cleanup**
-- **Fixed**: Graceful shutdown via socket → SIGTERM → SIGKILL
-- **Solution**: Proper shutdown sequence with timeouts
+## Previously Resolved
 
-### 4. **Test Failures**
-- **Fixed**: All 67 tests now passing
-- **Solution**: Updated tests to match current architecture
+### High CPU Usage (Resolved)
+The original 80-100% CPU usage issue from stdin polling was fixed with Unix socket implementation, achieving < 1% CPU usage.
 
-### 5. **Agent Recovery**
-- **Fixed**: Automatic restart with configurable limits
-- **Solution**: Health monitoring with auto-recovery system
-
-### 6. **Metrics Collection**
-- **Fixed**: Full Prometheus-compatible metrics
-- **Solution**: Metrics exposed via socket commands
-
-### 7. **Dynamic Connections**
-- **Fixed**: Any topology, any agent names
-- **Solution**: Dynamic connection manager with runtime updates
-
-### 8. **Terminal Blocking on CLI Start** (Fixed August 19, 2025)
-- **Fixed**: CLI `start` command was blocking terminal, requiring Ctrl+C
-- **Root Cause**: `subprocess.PIPE` creates threads that prevent Python exit
-- **Solution**: Use `subprocess.DEVNULL` for non-monitoring mode
-
-### 9. **Library Mode Timeout** (Fixed August 19, 2025)
-- **Fixed**: Library example timing out with "Agents not ready after 30s"
-- **Root Cause**: Socket readiness check needed when stdout goes to DEVNULL
-- **Solution**: Modified `_wait_for_all_ready()` to check socket health
-
-### 10. **Stdin/Stdout Legacy Code** (Removed August 19, 2025)
-- **Fixed**: Complex dual-mode communication system removed
-- **Impact**: Simplified codebase, eliminated CPU spinning issues
-- **Solution**: Socket-only mode for all agent communication
+### CLI Connect Command (Resolved) 
+CLI commands now work properly via Unix sockets instead of failing silently.
 
 ## Performance Notes
 
 Current performance characteristics:
 - **CPU**: < 1% idle (event-driven, no polling)
 - **Memory**: ~50MB per agent
-- **Latency**: < 10ms for health checks
-- **Reliability**: Auto-recovery from crashes
+- **Latency**: < 10ms for health checks and CLI commands
+- **Test Coverage**: 71/71 tests passing
 
-The framework is production-ready with comprehensive error handling and monitoring.
+## Priority for Resolution
+
+1. **High**: Agent-to-agent tool call response visibility in CLI
+2. **Medium**: Zombie process cleanup automation  
+3. **Low**: CLI command wrapper (`agentctl`)
+4. **Community**: Windows compatibility

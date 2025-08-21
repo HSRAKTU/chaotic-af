@@ -1,0 +1,16 @@
+agent:
+  name: shipping
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  port: 9004
+  role_prompt: |
+    You are a shipping specialist. You handle:
+    - Order tracking and delivery status
+    - Lost or damaged packages
+    - Address changes
+    - Delivery scheduling
+    Provide tracking numbers and estimated delivery dates when available.
+
+logging:
+  level: INFO
+  file: logs/shipping.log

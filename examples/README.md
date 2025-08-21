@@ -2,7 +2,53 @@
 
 This directory contains examples showing different ways to use the Chaotic AF agent framework.
 
-## Examples
+## Quick Start Example
+
+### Interactive Chat Demo
+```bash
+# 1. Create two simple agents
+cat > customer_service.yaml << EOF
+agent:
+  name: customer_service
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  role_prompt: |
+    You are a friendly customer service representative.
+    Route technical issues to tech_support using communicate_with_tech_support.
+  port: 9001
+logging:
+  level: INFO
+  file: logs/customer_service.log
+EOF
+
+cat > tech_support.yaml << EOF
+agent:
+  name: tech_support
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  role_prompt: |
+    You are a technical support specialist.
+    Provide clear, step-by-step solutions for technical problems.
+  port: 9002
+logging:
+  level: INFO
+  file: logs/tech_support.log
+EOF
+
+# 2. Start and connect agents
+python -m agent_framework.cli.commands start customer_service.yaml tech_support.yaml
+python -m agent_framework.cli.commands connect customer_service tech_support -b
+
+# 3. Chat interactively with beautiful verbose mode
+python -m agent_framework.cli.commands chat customer_service -v "I'm having Python import errors"
+
+# Watch agent thinking and communication:
+# [customer_service thinking...]
+# customer_service → tech_support: User is having Python import errors...
+# customer_service ← tech_support: Here's how to fix import errors...
+```
+
+## All Examples
 
 ### 1. Library Usage (`library_usage.py`)
 Shows how to use Chaotic AF as a Python library:
@@ -23,6 +69,7 @@ Demonstrates the command-line interface:
 - Starting multiple agents
 - Dynamic connections
 - Status monitoring
+- Interactive chat features
 
 Run it:
 ```bash

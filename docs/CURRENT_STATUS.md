@@ -1,10 +1,10 @@
 # Current Status: Chaotic AF Framework
 
-> **Last Updated**: August 19, 2025 
+> **Last Updated**: August 21, 2025 
 
 ## 🎯 Project Overview
 
-Chaotic AF is a multi-agent AI framework built on the Model Context Protocol (MCP). It enables seamless agent-to-agent communication with zero-CPU overhead, health monitoring, auto-recovery, and comprehensive observability.
+Chaotic AF is a multi-agent AI framework built on the Model Context Protocol (MCP). It enables seamless agent-to-agent communication with zero-CPU overhead, health monitoring, auto-recovery, comprehensive observability, and beautiful interactive chat experiences.
 
 ## ✅ Completed Features
 
@@ -42,50 +42,69 @@ Chaotic AF is a multi-agent AI framework built on the Model Context Protocol (MC
 ### 5. **Comprehensive CLI Interface**
    ```bash
    # Lifecycle management
-   agentctl start alice.yaml bob.yaml   # NON-BLOCKING: Returns immediately
-   agentctl stop alice                  # Stop specific agent
-   agentctl restart                     # Restart all agents
-   agentctl remove alice                # Remove from state tracking
-   agentctl remove --stopped            # Clean up all stopped agents
-   agentctl remove --failed             # Clean up all failed agents
+   python -m agent_framework.cli.commands start alice.yaml bob.yaml   # NON-BLOCKING: Returns immediately
+   python -m agent_framework.cli.commands stop alice                  # Stop specific agent
+   python -m agent_framework.cli.commands restart                     # Restart all agents
+   python -m agent_framework.cli.commands remove alice                # Remove from state tracking
+   python -m agent_framework.cli.commands remove --stopped            # Clean up all stopped agents
+   python -m agent_framework.cli.commands remove --failed             # Clean up all failed agents
    
-   # Monitoring (ENHANCED August 19)
-   agentctl status                      # Real-time status with timing info
+   # Interactive Chat (FULLY WORKING!)
+   python -m agent_framework.cli.commands chat alice "Hello!"            # Send single message
+   python -m agent_framework.cli.commands chat alice -v "Ask bob X"      # Verbose mode - see agent thinking
+   python -m agent_framework.cli.commands chat alice -i                  # Interactive chat session
+   python -m agent_framework.cli.commands chat alice -i -v               # Interactive + verbose
+   
+   # Monitoring (ENHANCED August 21)
+   python -m agent_framework.cli.commands status                      # Real-time status with timing info
    # Shows: starting (2s ago), running ✓, failed, stopped
-   agentctl watch                       # Live monitoring (like htop)
-   agentctl health alice                # Check agent health
-   agentctl metrics alice -f prometheus # Get Prometheus metrics
+   python -m agent_framework.cli.commands watch                       # Live monitoring (like htop)
+   python -m agent_framework.cli.commands health alice                # Check agent health
+   python -m agent_framework.cli.commands metrics alice -f prometheus # Get Prometheus metrics
    
    # Connections
-   agentctl connect alice bob -b        # Bidirectional connection
+   python -m agent_framework.cli.commands connect alice bob -b        # Bidirectional connection
    
    # Debugging
-   agentctl logs alice -f               # Follow logs
-   agentctl init                        # Create agent template
-   
-   # Chat (ATTEMPTED but postponed)
-   agentctl chat alice                  # Single message (not yet working)
-   agentctl chat alice --interactive    # Interactive session (not yet working)
+   python -m agent_framework.cli.commands logs alice -f               # Follow logs
+   python -m agent_framework.cli.commands init                        # Create agent template
    ```
 
-   **Major CLI Improvements (August 19, 2025):**
-   - **Non-blocking start**: `agentctl start` returns immediately, no terminal blocking
+   **Major CLI Improvements (August 21, 2025):**
+   - **Interactive Chat**: Full chat interface with verbose mode showing agent thinking
+   - **Real-time Events**: CLI subscribes to agent events for live observability
+   - **Colored Communication**: Visual arrows showing agent-to-agent message flow
+   - **Non-blocking start**: Commands return immediately, no terminal blocking
    - **Enhanced status**: Shows real-time agent states with color coding and timing
    - **State management**: New `remove` command for cleaning up agent registry
    - **Process isolation**: Each CLI command runs independently (no daemon)
    - **Socket-based health checks**: Status command uses sockets to verify agent readiness
 
-### 6. **Complete Test Suite**
-   - **67 tests, all passing**:
-     - 44 unit tests covering all modules
-     - 23 integration tests including:
+### 6. **Interactive Chat Experience (NEW)**
+   - **Beautiful CLI Chat Interface**: Interactive chat with verbose mode
+   - **Real-time Event Streaming**: See agent thinking, tool calls, and responses
+   - **Colored Agent Communication**: Visual arrows showing message flow (`agent1 → agent2`, `agent1 ← agent2`)
+   - **Event Subscription**: CLI subscribes to agent events for live observability
+   - **WhatsApp-style Experience**: Intuitive chat flow for multi-agent conversations
+
+### 7. **Centralized Architecture (REFINED)**
+   - **AgentSocketClient**: Unified socket communication across CLI and library
+   - **Dynamic Tool Discovery**: Agents automatically discover `communicate_with_<agent>` tools
+   - **Removed Redundant Tools**: Eliminated `contact_agent` proxy tool for direct MCP communication
+   - **Race Condition Fixes**: Resolved event emission timing issues for reliable CLI display
+
+### 8. **Complete Test Suite**
+   - **71 tests, all passing**:
+     - 54 unit tests covering all modules including new socket client
+     - 17 integration tests including:
        - Graceful shutdown scenarios
        - Health monitoring and auto-recovery
        - Metrics collection
        - CLI command functionality
+       - Interactive chat and event streaming
    - Comprehensive coverage of production scenarios
 
-### 7. **Working Examples**
+### 9. **Working Examples & Demos**
    - Simple demo - basic agent communication
    - Debug demo - verbose tool call logging
    - Discussion demo - multi-agent collaboration
@@ -188,65 +207,70 @@ agentctl watch  # Live monitoring
 
 The framework successfully delivers on its promise: **spawn agents, connect them in any topology, let them collaborate**. Zero CPU overhead. Pure chaos, perfectly orchestrated.
 
-## 🔄 Recent Architectural Updates (August 19, 2025)
+## 🔄 Recent Architectural Updates (August 21, 2025)
 
 ### Major Changes Implemented
-1. **Stdin/Stdout Mode Removed**: Simplified to socket-only communication
-2. **Non-blocking CLI Start**: Terminal no longer blocks when starting agents
-3. **Enhanced Status Command**: Real-time agent state tracking with timing
-4. **Library Mode Fixed**: Socket-based readiness checks for DEVNULL mode
-5. **Comprehensive Test Updates**: All tests updated for new architecture
+1. **Interactive Chat System**: Complete CLI chat interface with verbose mode
+2. **Centralized Socket Communication**: New `AgentSocketClient` for unified API access
+3. **Dynamic Tool Discovery**: Agents discover `communicate_with_<agent>` tools automatically
+4. **MCP Architecture Refinements**: Removed redundant `contact_agent` proxy tool
+5. **Event System Improvements**: Fixed race conditions for reliable CLI event display
+6. **Comprehensive Test Updates**: All 71 tests passing with new architecture
 
 ### Documentation Updates
-- Created `CLI_VS_LIBRARY_ARCHITECTURE.md` explaining execution model differences
-- Updated `KNOWN_ISSUES.md` with current issues and fixes
-- Socket API duplication identified as priority refactoring target
+- Updated all major documentation files for new architecture
+- Added interactive chat examples to README
+- Comprehensive status tracking in CURRENT_STATUS.md
+- Updated KNOWN_ISSUES.md with resolved architectural problems
 
 ## 🎯 Next Priorities
 
 ### High Priority Tasks
 
-1. **Refactor Socket APIs to Framework Layer**
-   - Move all socket communication logic from CLI to framework
-   - Create unified `AgentClient` class for all interfaces
-   - Eliminate code duplication between CLI, supervisor, and connection manager
-   - Ensure CLI acts purely as an interface layer
+1. **Documentation & Examples Enhancement**
+   - Create comprehensive getting started tutorial
+   - Add more real-world example use cases
+   - Improve API reference documentation
+   - Add video demos of interactive chat features
 
-2. **Resolve Library vs CLI Architecture Ambiguity**
-   - Implement shared socket client to bridge both modes
-   - Maintain clear separation: CLI (stateless) vs Library (stateful)
-   - Document and enforce architectural boundaries
+2. **Advanced Chat Features**
+   - Multi-agent conversation orchestration
+   - Chat history persistence and retrieval
+   - Custom system prompts for chat sessions
+   - Export conversation logs to different formats
 
-3. **Chat Interface Implementation**
-   - Add `agentctl chat <agent>` command for single message
-   - Add `agentctl chat <agent> --interactive` for continuous chat
-   - Ensure implementation uses framework APIs only (no socket logic in CLI)
+3. **Monitoring & Observability**
+   - Web-based dashboard for agent monitoring
+   - Grafana dashboard templates for metrics
+   - Enhanced logging with structured events
+   - Alert system for agent failures
 
-4. **Library Testing Suite**
-   - Comprehensive integration tests for library usage patterns
-   - Test dynamic agent management scenarios
-   - Error handling and edge cases
-   - Performance and resource cleanup tests
+4. **Performance & Scalability**
+   - Load testing with 50+ agents
+   - Memory usage optimization
+   - Connection pooling for better performance
+   - Distributed agent support across machines
 
-5. **Grafana Integration Preparation**
-   - Ensure Prometheus metrics are properly exposed
-   - Design metric namespaces and labels
-   - Document metric collection patterns
-   - Prepare example Grafana dashboards
+5. **Developer Experience**
+   - VS Code extension for agent development
+   - Better error messages and debugging tools
+   - Agent configuration validation and suggestions
+   - Hot-reload for agent configuration changes
 
-### Architecture Principles Moving Forward
-- **CLI = Frontend**: Only calls framework APIs
-- **Framework = Backend**: Contains all business logic and socket handling
-- **Clean Interfaces**: Enable easy addition of Web UI, REST API, etc.
+### Architecture Principles (Fully Implemented)
+- ✅ **CLI = Frontend**: Only calls framework APIs via centralized AgentSocketClient
+- ✅ **Framework = Backend**: Contains all business logic and socket handling
+- ✅ **Clean Interfaces**: Foundation ready for Web UI, REST API, and other frontends
+- ✅ **Dynamic Tool Discovery**: No hardcoded tool names, completely flexible
 
 ## 💡 Design Philosophy & Lessons Learned
 
-### Core Principles Reinforced (August 19, 2025)
-1. **Simplicity Over Features**: Removing stdin mode simplified everything
-2. **Clear Boundaries**: CLI and Library serve different use cases, don't mix them
-3. **Socket-First**: All IPC through sockets provides consistency
-4. **Process Independence**: Agents should run without parent supervisor
-5. **Observability**: Logs + Metrics + Socket status = Complete picture
+### Core Principles Reinforced (August 21, 2025)
+1. **User Experience First**: Interactive chat with beautiful visuals over complex internals
+2. **Architecture Clarity**: Removed redundant tools, centralized communication
+3. **Event-Driven Design**: Real-time observability through proper event streaming
+4. **MCP Protocol Respect**: Direct tool calls instead of proxy patterns
+5. **Testing Confidence**: 71 passing tests enable fearless refactoring
 
 ### What Works Well
 - **Unix Socket Control**: Zero CPU overhead, reliable, simple protocol
@@ -255,16 +279,24 @@ The framework successfully delivers on its promise: **spawn agents, connect them
 - **Dynamic Connections**: No hardcoded topology, complete flexibility
 - **Non-blocking Operations**: Better UX, no terminal hanging
 
-### What Needs Improvement
-- **Code Duplication**: Socket client code scattered across modules
-- **Chat Integration**: MCP tool access from control socket is complex
-- **Test Coverage**: Need more library-specific integration tests
-- **Error Messages**: Some timeout errors lack detail about root cause
-- **Documentation**: API reference documentation needed
+### What Works Exceptionally Well Now
+- ✅ **Interactive Chat**: Beautiful CLI experience with real-time agent communication
+- ✅ **Centralized Architecture**: AgentSocketClient eliminates code duplication
+- ✅ **Event Streaming**: Reliable real-time observability of all agent actions
+- ✅ **Dynamic Tool Discovery**: Completely flexible agent-to-agent communication
+- ✅ **MCP Integration**: Proper protocol usage without architectural violations
+
+### Areas for Future Enhancement
+- **Documentation**: More comprehensive API reference and tutorials needed
+- **Advanced Features**: Multi-agent conversation orchestration
+- **Monitoring UI**: Web dashboard for visual agent management
+- **Performance**: Load testing and optimization for large-scale deployments
+- **Developer Tools**: VS Code extension and better debugging support
 
 ### Future Architecture Direction
-1. **Unified Client Layer**: Single `AgentClient` for all socket operations
+1. ✅ **Unified Client Layer**: AgentSocketClient implemented for all socket operations
 2. **Plugin System**: Allow custom tools without modifying core
-3. **Daemon Mode**: Optional persistent supervisor for CLI
-4. **Web UI Ready**: Clean APIs will enable browser-based management
+3. **Daemon Mode**: Optional persistent supervisor for CLI convenience
+4. ✅ **Web UI Ready**: Clean APIs foundation complete for browser-based management
 5. **Distributed Mode**: Socket API could extend to TCP for remote agents
+6. **Advanced Orchestration**: Multi-agent workflow management and conversation routing

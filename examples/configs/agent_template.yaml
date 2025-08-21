@@ -1,0 +1,15 @@
+# Agent Configuration Template
+agent:
+  name: my_agent
+  llm_provider: google        # Options: openai, anthropic, google
+  llm_model: gemini-1.5-pro
+  role_prompt: |
+    You are a helpful assistant agent.
+    Your role is to assist with various tasks.
+  port: 8001
+
+external_mcp_servers: []
+
+logging:
+  level: INFO
+  file: logs/my_agent.log

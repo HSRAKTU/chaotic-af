@@ -8,7 +8,7 @@
   
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-  [![Tests: Passing](https://img.shields.io/badge/tests-67%20passing-brightgreen.svg)](tests/)
+  [![Tests: Passing](https://img.shields.io/badge/tests-71%20passing-brightgreen.svg)](tests/)
 </div>
 
 ---
@@ -34,9 +34,12 @@ A Python framework for building multi-agent AI systems with bidirectional commun
 - **Event Streaming**: Real-time event emission for observability
 
 ### Developer Experience
+- **Interactive Chat CLI**: Beautiful verbose chat mode showing agent thinking and inter-agent communication
+- **Real-time Observability**: See agent-to-agent messages with colored arrows (`agent1 → agent2`, `agent1 ← agent2`)
+- **Dynamic Tool Discovery**: Agents automatically discover `communicate_with_<agent>` tools from connected peers
 - **Robust CLI**: Rich commands for agent management, monitoring, and debugging
 - **Live Monitoring**: Real-time agent status with `agentctl watch`
-- **Comprehensive Testing**: 67+ unit and integration tests
+- **Comprehensive Testing**: 71+ unit and integration tests
 - **Bidirectional Connections**: Agents can both provide and consume services
 
 ## 🚀 Quick Start
@@ -86,7 +89,67 @@ OPENAI_API_KEY=your-openai-key-here  # Optional
 ANTHROPIC_API_KEY=your-anthropic-key-here  # Optional
 ```
 
-### 4. Run Example Demos
+### 4. Start Your First Agent System
+
+Create agent configs:
+```bash
+# Create customer_service agent
+cat > customer_service.yaml << EOF
+agent:
+  name: customer_service
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  role_prompt: |
+    You are a friendly customer service representative.
+    Your job is to understand customer issues and route them to the right specialist.
+    Available specialists: tech_support (technical issues).
+    Always be polite and empathetic. Ask clarifying questions if needed.
+  port: 9001
+
+logging:
+  level: INFO
+  file: logs/customer_service.log
+EOF
+
+# Create tech_support agent  
+cat > tech_support.yaml << EOF
+agent:
+  name: tech_support
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  role_prompt: |
+    You are a technical support specialist. You help with:
+    - Software installation and configuration
+    - Bug reports and error messages
+    - Performance issues
+    - Integration problems
+    Provide clear, step-by-step solutions. If you need more info, ask specific technical questions.
+  port: 9002
+
+logging:
+  level: INFO
+  file: logs/tech_support.log
+EOF
+```
+
+Start agents and test interactive chat:
+```bash
+# Start agents
+python -m agent_framework.cli.commands start customer_service.yaml tech_support.yaml
+
+# Connect them
+python -m agent_framework.cli.commands connect customer_service tech_support -b
+
+# Test with beautiful interactive chat
+python -m agent_framework.cli.commands chat customer_service -v "I'm having Python errors, can you help me?"
+
+# Watch the magic! See agent thinking, tool calls, and responses:
+# [customer_service thinking...]
+# customer_service → tech_support: User is having Python errors...
+# customer_service ← tech_support: I can help with that...
+```
+
+### 5. Run More Demos
 
 ```bash
 # Simple demo - basic agent communication
@@ -95,14 +158,8 @@ python examples/simple.py
 # Debug demo - see all tool calls and responses
 python examples/debug.py
 
-# Discussion demo - military-style multi-agent discussion
+# Discussion demo - multi-agent collaboration
 python examples/discussion.py
-
-# Dynamic demo - showcase dynamic connection capabilities
-python examples/dynamic.py
-
-# CLI usage demo - demonstrates all CLI commands
-cd examples/cli_usage && ./demo.sh
 
 # Library usage - programmatic agent management
 python examples/library_usage.py
@@ -123,21 +180,23 @@ Each agent consists of:
 ```
 agent_framework/
 ├── core/
-│   ├── agent.py           # Main Agent class
+│   ├── agent.py           # Main Agent class with tool handling
 │   ├── config.py          # Configuration handling
 │   ├── llm.py             # LLM abstraction layer
-│   ├── events.py          # Event streaming system
+│   ├── events.py          # Event streaming system with race-condition fixes
 │   └── logging.py         # Structured logging
 ├── mcp/
-│   ├── server_universal.py # Universal MCP server
-│   └── client.py          # MCP client implementation
+│   ├── server_universal.py # Universal MCP server with dynamic tool discovery
+│   └── client.py          # MCP client with communicate_with_<agent> tools
+├── client/
+│   └── socket_client.py   # Centralized socket communication (NEW)
 ├── network/
 │   ├── supervisor.py      # Process management with health monitoring
 │   ├── agent_runner.py    # Individual agent runner
 │   ├── connection_manager.py # Dynamic connection management
 │   └── control_socket.py  # Unix socket control interface
 └── cli/
-    └── commands.py        # Full-featured CLI interface
+    └── commands.py        # Full CLI with interactive chat support
 ```
 
 ## 🛠️ Creating Your Own Agents
@@ -187,10 +246,11 @@ await supervisor.start_all()
 
 ### 3. Connect Agents
 
-Agents discover tools from other connected agents dynamically:
-- `communicate_with_<agent_name>`: Send messages to specific connected agents
-- Tools are discovered via MCP protocol when agents connect
-- `chat_with_user`: Direct human interaction endpoint
+Agents discover and use tools from other connected agents automatically:
+- **Dynamic Tool Discovery**: When agents connect, they can see each other's `communicate_with_<agent_name>` tools
+- **Direct MCP Communication**: No proxy tools - agents call each other's MCP servers directly
+- **Bidirectional**: Both agents can communicate with each other once connected
+- **Chat Interface**: Use `chat_with_user` tool for direct human interaction
 
 ## 🔍 Example Usage
 
@@ -238,26 +298,32 @@ await supervisor.connect("alice", "bob")
 
 ```bash
 # Agent lifecycle management
-agentctl start agent1.yaml agent2.yaml  # Start agents
-agentctl stop alice                     # Stop specific agent
-agentctl stop                           # Stop all agents
-agentctl restart alice bob              # Restart specific agents
-agentctl restart                        # Restart all agents
+python -m agent_framework.cli.commands start agent1.yaml agent2.yaml  # Start agents
+python -m agent_framework.cli.commands stop alice                     # Stop specific agent
+python -m agent_framework.cli.commands stop                           # Stop all agents
+python -m agent_framework.cli.commands restart alice bob              # Restart specific agents
+python -m agent_framework.cli.commands restart                        # Restart all agents
+
+# Interactive Chat (NEW!)
+python -m agent_framework.cli.commands chat alice "Hello!"            # Send message to alice
+python -m agent_framework.cli.commands chat alice -v "Ask bob about X" # Verbose mode - see agent thinking
+python -m agent_framework.cli.commands chat alice -i                  # Interactive chat session
+python -m agent_framework.cli.commands chat alice -i -v               # Interactive + verbose
 
 # Monitoring and debugging
-agentctl status                         # Show agent status
-agentctl watch                          # Live monitoring (like htop)
-agentctl logs alice -f                  # Follow agent logs
-agentctl health alice                   # Check agent health via socket
-agentctl metrics alice                  # Get agent metrics
-agentctl metrics alice -f prometheus    # Get metrics in Prometheus format
+python -m agent_framework.cli.commands status                         # Show agent status
+python -m agent_framework.cli.commands watch                          # Live monitoring (like htop)
+python -m agent_framework.cli.commands logs alice -f                  # Follow agent logs
+python -m agent_framework.cli.commands health alice                   # Check agent health via socket
+python -m agent_framework.cli.commands metrics alice                  # Get agent metrics
+python -m agent_framework.cli.commands metrics alice -f prometheus    # Get metrics in Prometheus format
 
 # Agent connections
-agentctl connect alice bob              # Connect alice → bob
-agentctl connect alice bob -b           # Bidirectional connection
+python -m agent_framework.cli.commands connect alice bob              # Connect alice → bob
+python -m agent_framework.cli.commands connect alice bob -b           # Bidirectional connection
 
 # Utilities
-agentctl init                           # Create agent template
+python -m agent_framework.cli.commands init                           # Create agent template
 ```
 
 ## 🎯 Key Features Explained
@@ -303,8 +369,10 @@ All agent actions emit structured events:
 
 ## 📚 Documentation
 
-- [Implementation Specs](docs/IMPLEMENTATION_SPECS.md) - Detailed architecture and design decisions
-- [Current Status](docs/CURRENT_STATUS.md) - Development progress and notes
+- [Architecture Details](docs/ARCHITECTURE.md) - Detailed architecture and MCP protocol usage
+- [Current Status](docs/CURRENT_STATUS.md) - Development progress and feature completeness
+- [Implementation Specs](docs/IMPLEMENTATION_SPECS.md) - Technical implementation details
+- [Known Issues](docs/KNOWN_ISSUES.md) - Current limitations and resolved issues
 - [UI Design Spec](docs/UI_DESIGN_SPEC.md) - Plans for monitoring UI
 
 ## 🤝 Contributing

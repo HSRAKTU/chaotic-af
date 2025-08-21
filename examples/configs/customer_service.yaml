@@ -1,0 +1,14 @@
+agent:
+  name: customer_service
+  llm_provider: google
+  llm_model: gemini-1.5-pro
+  port: 9001
+  role_prompt: |
+    You are a friendly customer service representative. 
+    Your job is to understand customer issues and route them to the right specialist.
+    Available specialists: tech_support (technical issues), billing (payment/subscription), shipping (order tracking).
+    Always be polite and empathetic. Ask clarifying questions if needed.
+
+logging:
+  level: INFO
+  file: logs/customer_service.log
