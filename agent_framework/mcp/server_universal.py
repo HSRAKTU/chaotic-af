@@ -27,7 +27,8 @@ class UniversalAgentMCPServer:
         llm_provider: LLMProvider,
         event_stream: EventStream,
         logger: AgentLogger,
-        mcp_client: Optional['AgentMCPClient'] = None
+        mcp_client: Optional['AgentMCPClient'] = None,
+        chaos_mode: bool = False
     ):
         self.agent_id = agent_id
         self.agent_role = agent_role
@@ -35,6 +36,7 @@ class UniversalAgentMCPServer:
         self.event_stream = event_stream
         self.logger = logger
         self.mcp_client = mcp_client
+        self.chaos_mode = chaos_mode
         
         # Track available connections dynamically
         self.available_connections: List[str] = []
@@ -115,16 +117,28 @@ and coordinate effectively with other agents."""
                 system_prompt = self._build_agent_system_prompt()
                 
                 # Build specific prompt for agent-to-agent communication
-                agent_system_prompt = f"""You are Agent {self.agent_id}. {self.agent_role}
+                if self.chaos_mode:
+                    agent_system_prompt = f"""You are Agent {self.agent_id}. {self.agent_role}
 
 You are responding to a message from {from_agent}, another agent in the system.
 
-IMPORTANT: Provide a direct, helpful answer to their message.
-- DO NOT use tool code or markdown formatting
-- DO NOT try to call tools (you have none available in this context)
-- Simply answer their question or respond to their request directly
+CHAOS MODE ENABLED: You have full access to communicate with other agents!
+- If the message asks you to propagate or relay something, DO IT!
+- You can use communicate_with_<agent_name> tools to contact other agents
+- For drill messages or propagation requests, contact other agents as requested
+- Continue discussions, create chains, coordinate with multiple agents
+- Available agents: {', '.join(self.available_connections) if self.available_connections else 'None'}
 
-Be concise and helpful."""
+Be collaborative and create discussion chains when requested!"""
+                else:
+                    agent_system_prompt = f"""You are Agent {self.agent_id}. {self.agent_role}
+
+You are responding to a message from {from_agent}, another agent in the system.
+
+GUARDRAIL MODE: You should provide direct answers to avoid infinite loops.
+- Provide a helpful, direct response to their message
+- Do not try to call other agents (tools are disabled for safety)
+- Be concise and helpful in your response"""
                 
                 # Simple conversation
                 messages = [
@@ -132,13 +146,63 @@ Be concise and helpful."""
                     {"role": "user", "content": f"Message from {from_agent}: {message}"}
                 ]
                 
-                # For agent-to-agent communication, we don't provide tools
-                # to avoid infinite loops where agents keep calling each other
+                # Chaos mode: Give agents tool access for chain reactions if enabled
+                available_tools = []
+                if self.chaos_mode and self.mcp_client:
+                    available_tools = await self.mcp_client.get_available_agent_tools()
+                    self.logger.info(f"CHAOS MODE ENABLED: Agent has access to {len(available_tools)} agent tools")
+                else:
+                    self.logger.info("GUARDRAIL MODE: Agent has no tool access (prevents infinite loops)")
+                
                 response = await self.llm.complete(
                     messages=messages,
-                    tools=[],  # No tools for agent-to-agent communication
+                    tools=available_tools,  # Tools available only in chaos mode
                     temperature=0.7
                 )
+                
+                # Handle tool calls only if chaos mode is enabled
+                if self.chaos_mode and response.tool_calls is not None:
+                    max_iterations = 5  # Prevent infinite loops
+                    iteration = 0
+                    
+                while self.chaos_mode and response.tool_calls is not None and iteration < max_iterations:
+                    iteration += 1
+                    self.logger.info(f"Agent communication iteration {iteration}, processing {len(response.tool_calls)} calls")
+                    
+                    # Process each tool call
+                    for tool_call in response.tool_calls:
+                        self.logger.info(f"Processing tool call: {tool_call.tool} with params: {tool_call.parameters}")
+                        
+                        # Handle agent communication tools
+                        if tool_call.tool.startswith("communicate_with_"):
+                            target_agent = tool_call.tool.replace("communicate_with_", "")
+                            message = tool_call.parameters.get("message", "")
+                            
+                            # Call the other agent - POTENTIAL FOR CHAOS!
+                            result = await self.mcp_client.communicate_with_agent(
+                                target_agent=target_agent,
+                                message=message,
+                                conversation_id=conv_id
+                            )
+                            
+                            # Feed result back to LLM for next iteration
+                            messages.append({
+                                "role": "assistant", 
+                                "content": response.content,
+                                "tool_calls": [{"id": tool_call.id, "type": "function", "function": {"name": tool_call.tool, "arguments": tool_call.parameters}}]
+                            })
+                            messages.append({
+                                "role": "tool",
+                                "content": str(result.get('response', '')),
+                                "tool_call_id": tool_call.id
+                            })
+                    
+                    # Get next response with tool results
+                    response = await self.llm.complete(
+                        messages=messages,
+                        tools=available_tools,  # Keep tools available for MORE CHAOS!
+                        temperature=0.7
+                    )
                 
                 return {
                     "response": response.content,

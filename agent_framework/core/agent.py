@@ -69,7 +69,8 @@ class Agent:
             llm_provider=self.llm,
             event_stream=self.event_stream,
             logger=self.logger,
-            mcp_client=self.mcp_client
+            mcp_client=self.mcp_client,
+            chaos_mode=config.chaos_mode
         )
         
         # Initialize metrics

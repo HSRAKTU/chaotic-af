@@ -29,6 +29,7 @@ class AgentConfig:
     external_mcp_servers: List[Dict[str, str]] = field(default_factory=list)
     log_level: str = "INFO"
     log_file: Optional[str] = None
+    chaos_mode: bool = False  # Enable agent-to-agent tool calling in communicate_with_agent
     
     def __post_init__(self):
         """Validate configuration."""
