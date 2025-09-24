@@ -151,7 +151,9 @@ python -m agent_framework.cli.commands start \
   examples/ui-specific/tech_lead.yaml \
   examples/ui-specific/qa_tester.yaml
 ````
-
+<img width="942" height="553" alt="Screenshot 2025-09-25 at 01 15 25" src="https://github.com/user-attachments/assets/16d6cc49-66d3-4f41-9a19-6a3787b0080f" />
+Checking Status:
+<img width="922" height="196" alt="Screenshot 2025-09-25 at 01 15 55" src="https://github.com/user-attachments/assets/924e0f2f-6741-4c8c-94c5-3e08325faea3" />
 ### 2. Connect Them
 
 ```bash
@@ -162,13 +164,15 @@ python -m agent_framework.cli.commands connect frontend_dev tech_lead -b
 python -m agent_framework.cli.commands connect qa_tester product_manager -b
 python -m agent_framework.cli.commands connect qa_tester frontend_dev -b
 ```
-
+<img width="954" height="280" alt="Screenshot 2025-09-25 at 01 16 16" src="https://github.com/user-attachments/assets/e62f1b08-a3e5-4308-8724-00cca864ba43" />
 ### 3. Chat with Verbose Mode
 
 ```bash
 python -m agent_framework.cli.commands chat product_manager -v \
   "We need to add user authentication with social login. How should we approach this?"
 ```
+
+<img width="1321" height="296" alt="Screenshot 2025-09-25 at 01 17 39" src="https://github.com/user-attachments/assets/b6334d41-857c-4d20-b294-0c13f74f6b28" />
 
 You’ll see product\_manager receive the query, consult frontend\_dev and backend\_dev, and coordinate with tech\_lead and qa\_tester before giving you an answer.
 
@@ -179,8 +183,6 @@ python -m agent_framework.cli.commands chat product_manager -i -v
 ```
 
 Type questions directly and watch the agents coordinate in real time.
-
-
 
 
 ## CLI Tool Commands
@@ -221,7 +223,64 @@ python -m agent_framework.cli.commands chat a -i             # Interactive sessi
 These improvements will make the CLI a reliable single source of truth for managing agents in real-world workflows.
 
 ---
+## Handling Zombie Processes
 
+In some cases, agent processes may not shut down cleanly and leave behind "zombie" processes or stray sockets. This can cause errors like agents showing as running when they are not, or failing to start on the same port.
+
+### Diagnose
+
+List all running agent processes:
+```bash
+ps -ef | grep agent_framework | grep -v grep
+````
+
+Check specifically for zombies or defunct processes:
+
+```bash
+ps -axo pid,ppid,stat,etime,comm | egrep " Z|defunct" || echo "no zombies"
+```
+
+Look for unreaped supervisor logs (optional):
+
+```bash
+grep -i reaped supervisor.log || echo "no reaped entries"
+```
+
+### Kill Stray Processes
+
+If you see unwanted processes, terminate them:
+
+```bash
+kill -9 <PID>
+```
+
+### Clean Up Sockets
+
+Remove any leftover control sockets to avoid conflicts:
+
+```bash
+rm -f /tmp/chaotic-af/agent-*.sock
+```
+
+### Restart Agents
+
+After cleanup, agents can be restarted safely:
+
+```bash
+python -m agent_framework.cli.commands start <configs...>
+```
+
+---
+
+**Tip**: If you run into repeated zombie issues, ensure you always stop agents with the CLI:
+
+```bash
+python -m agent_framework.cli.commands stop
+```
+
+instead of closing your terminal or killing the supervisor abruptly.
+
+---
 ## Current Status & Next Steps
 
 * ✅ Centralized socket client, dynamic tool discovery, event streaming.
